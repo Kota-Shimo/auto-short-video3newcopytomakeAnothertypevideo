@@ -1,0 +1,18 @@
+combos:
+  - audio: en
+    subs:  [en, pt]
+    account: acc1       # ← 1 本目用トークン
+
+  # combos.yaml ─ 追加分だけ抜粋
+  - audio: ja          # 日本語音声
+    subs:  [ja, en]    # 上段: 日本語　下段: 英語
+    account: acc4      # ← acc4 用トークン
+
+  - audio: ja
+    subs: [ja, ko]     # 上段: 日本語　下段: 韓国語
+    account: acc5
+
+  - audio: ja
+    subs: [ja, id]     # 上段: 日本語　下段: インドネシア語
+    account: acc6
+

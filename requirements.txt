@@ -1,0 +1,21 @@
+# ==== Core ====
+python-dotenv>=1.0.1
+numpy==1.26.4
+watchdog==3.0.0
+
+# ==== Media Processing ====
+moviepy==2.1.2
+pillow>=10.0,<10.3
+ffmpeg-python==0.2.0
+imageio>=2.34
+imageio-ffmpeg>=0.4.9
+pydub==0.25.1   
+
+# ==== Gen-AI SDK ====
+openai>=1.27.0
+stability-sdk>=0.7.0
+elevenlabs==0.2.27 
+requests>=2.32.0
+tqdm>=4.66.4
+streamlit==1.35.0
+
