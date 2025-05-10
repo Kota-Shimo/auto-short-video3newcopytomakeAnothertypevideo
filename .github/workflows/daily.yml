@@ -1,0 +1,60 @@
+name: Auto-Podcast-Daily
+
+on:
+  # ⏰ 毎日 JST 11:00（＝UTC 02:00）に自動実行
+  schedule:
+    - cron: '0 2 * * *'
+  # ▶️ 手動トリガーも可
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # ─────────────────────────────── ① 取得
+    - name: ⬇️ Checkout repo
+      uses: actions/checkout@v4
+
+    # ─────────────────────────────── ② Python
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    # ─────────────────────────────── ③ 依存ライブラリ
+    - name: 📦 Install requirements
+      run: |
+        sudo apt-get update -y      # FFmpeg 用
+        sudo apt-get install -y ffmpeg
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+
+    # ─────────────────────────────── ④ YouTube OAuth トークン展開
+    - name: 🔑 Restore YouTube tokens
+      env:
+        YT_ACC1: ${{ secrets.YT_TOKEN_ACC1 }}
+        YT_ACC4: ${{ secrets.YT_TOKEN_ACC4 }}
+        YT_ACC5: ${{ secrets.YT_TOKEN_ACC5 }}
+        YT_ACC6: ${{ secrets.YT_TOKEN_ACC6 }}
+      run: |
+        mkdir -p tokens
+        echo "$YT_ACC1" | base64 -d > tokens/token_acc1.pkl
+        echo "$YT_ACC4" | base64 -d > tokens/token_acc4.pkl
+        echo "$YT_ACC5" | base64 -d > tokens/token_acc5.pkl
+        echo "$YT_ACC6" | base64 -d > tokens/token_acc6.pkl
+
+    # ─────────────────────────────── ⑤ 今日のトピック決定
+    - name: 📝 Pick today’s topic
+      id: topic
+      run: |
+        echo "topic=$(python topic_picker.py)" >> "$GITHUB_OUTPUT"
+
+    # ─────────────────────────────── ⑥ 動画生成 & アップロード
+    - name: 🎥 Generate & upload video
+      env:
+        OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
+        UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+      run: |
+        python main.py "${{ steps.topic.outputs.topic }}" \
+               --turns 6 --privacy public
