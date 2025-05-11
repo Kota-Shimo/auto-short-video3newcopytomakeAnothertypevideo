@@ -39,9 +39,9 @@ def pick_font(text: str) -> str:
 
 # ============ レイアウト定数（横動画用） ============
 SCREEN_W, SCREEN_H = 1920, 1080
-DEFAULT_FSIZE_TOP  = 75   # ← デフォルト上段サイズ
-DEFAULT_FSIZE_BOT  = 70   # ← デフォルト下段サイズ
-TEXT_W             = 1500
+DEFAULT_FSIZE_TOP  = 95   # ← デフォルト上段サイズ
+DEFAULT_FSIZE_BOT  = 90   # ← デフォルト下段サイズ
+TEXT_W             = 1700
 POS_Y              = 880
 LINE_GAP           = 26
 BOTTOM_MARGIN      = 30
