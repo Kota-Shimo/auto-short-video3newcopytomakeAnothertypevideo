@@ -39,9 +39,9 @@ def pick_font(text: str) -> str:
 
 # ============ レイアウト定数（横動画用） ============
 SCREEN_W, SCREEN_H = 1920, 1080
-DEFAULT_FSIZE_TOP  = 95   # ← デフォルト上段サイズ
-DEFAULT_FSIZE_BOT  = 90   # ← デフォルト下段サイズ
-TEXT_W             = 1700
+DEFAULT_FSIZE_TOP  = 75   # ← デフォルト上段サイズ
+DEFAULT_FSIZE_BOT  = 70   # ← デフォルト下段サイズ
+TEXT_W             = 1500
 POS_Y              = 880
 LINE_GAP           = 26
 BOTTOM_MARGIN      = 30
@@ -78,7 +78,7 @@ def build_video(
             text=top_txt,
             font=pick_font(top_body),
             font_size=fsize_top,
-            color="white", stroke_color="black", stroke_width=4,
+            color="white", stroke_color="black", stroke_width=8,
             method="caption", size=(TEXT_W, None),
         )
         top_bg   = _bg(top_clip)

@@ -19,7 +19,7 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
 # ── OpenAI TTS 用 (Alice 用, Bob 用) ───────────
 VOICE_MAP = {
     "en": ("alloy",   "echo"),     # 英語 : 落ち着いた男性 / 落ち着いた女性
-    "ja": ("nova",    "shimmer"),  # 日本語 : 女性 / 中性
+    "ja": ("nova",    "echo"),  # 日本語 : 女性 / 中性
     "pt": ("fable",   "onyx"),     # ポルトガル語 : やや明るい / 低め
     "id": ("alloy",   "fable"),    # インドネシア語 : 落ち着き / 明るめ
 }

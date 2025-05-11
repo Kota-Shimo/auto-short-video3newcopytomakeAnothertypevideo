@@ -46,9 +46,9 @@ def _primary_lang(audio_lang: str, subs: list[str]) -> str:
 def make_title(topic, audio_lang, subs):
     primary = _primary_lang(audio_lang, subs)
     prompt  = (
-        "You are a YouTube Shorts copywriter.\n"
-        "Write a catchy title (≤55 ASCII or 28 JP chars).\n"
-        f"Main part in {primary.upper()}, then ' | ' and an English gloss, end with #Shorts.\n"
+        "You are a YouTube video copywriter.\n"
+        "Write a clear and engaging title (≤55 ASCII or 28 JP characters).\n"
+        f"Main part in {primary.upper()}, then ' | ' and an English gloss.\n"
         f"Topic: {topic}"
     )
     rsp = GPT.chat.completions.create(
@@ -61,19 +61,32 @@ def make_title(topic, audio_lang, subs):
 # ── GPT 説明欄 ────────────────────────────────────
 def make_desc(topic, audio_lang, subs):
     primary = _primary_lang(audio_lang, subs)
-    prompt = (
+
+    # --- 本文を生成 ---
+    prompt_desc = (
         f"Write one sentence (≤90 characters) in {primary.upper()} summarising "
         f'\"{topic}\" and ending with a short call-to-action.'
     )
     rsp = GPT.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": prompt_desc}],
         temperature=0.5,
     )
     base = rsp.choices[0].message.content.strip()
-    hashtags = ["#Shorts", "#LanguageLearning"]
-    if primary != "en": hashtags.append(f"#Learn{primary.upper()}")
-    return f"{base} {' '.join(hashtags[:3])}"
+
+    # --- ハッシュタグをその国の言語で生成 ---
+    prompt_tags = (
+        f"List 2 or 3 popular hashtags in {primary.upper()} used by language learners studying {primary.upper()}. "
+        "Respond ONLY with the hashtags, separated by spaces."
+    )
+    tag_rsp = GPT.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt_tags}],
+        temperature=0.3,
+    )
+    hashtags = tag_rsp.choices[0].message.content.strip().replace("\n", " ")
+
+    return f"{base} {hashtags}"
 
 # ── メタ tags ─────────────────────────────────────
 LANG_NAME = {"en": "English","pt":"Portuguese","id":"Indonesian",
@@ -109,6 +122,10 @@ def run_one(topic, turns, audio_lang, subs,
     # 2) TTS & 翻訳
     mp_parts, durations, sub_rows = [], [], [[] for _ in subs]
     for i, (spk, line) in enumerate(dialogue, 1):
+        if line.strip() in ("...", ""):
+            print(f"⚠️ スキップ: {spk} のセリフが無効（{line}）")
+            continue  # 音声も字幕も生成しない
+
         mp = TEMP / f"{i:02d}.mp3"
         speak(audio_lang, spk, line, mp)
         mp_parts.append(mp)
@@ -130,8 +147,11 @@ def run_one(topic, turns, audio_lang, subs,
     # 4) 動画生成
     stamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
     outfile = OUTPUT / f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
-    lines   = [(spk, *[row[i] for row in sub_rows], dur)
-               for i, ((spk, _), dur) in enumerate(zip(dialogue, durations))]
+    # 有効な行だけで再構築（durationsとsub_rowsの長さに基づく）
+    valid_dialogue = [d for d in dialogue if d[1].strip() not in ("...", "")]
+    lines = [(spk, *[row[i] for row in sub_rows], dur)
+            for i, ((spk, _), dur) in enumerate(zip(valid_dialogue, durations))]
+    
     build_video(lines, bg_png, TEMP / "full.mp3", outfile,
                 rows=len(subs),
                 fsize_top=fsize_top,
@@ -155,8 +175,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("topic",               help="会話テーマ")
     ap.add_argument("--turns", type=int,   default=8, help="往復回数 (1=Alice+Bob)")
-    ap.add_argument("--fsize-top", type=int, default=48, help="上段字幕フォントサイズ")
-    ap.add_argument("--fsize-bot", type=int, default=42, help="下段字幕フォントサイズ")
+    ap.add_argument("--fsize-top", type=int, default=65, help="上段字幕フォントサイズ")
+    ap.add_argument("--fsize-bot", type=int, default=60, help="下段字幕フォントサイズ")
     ap.add_argument("--privacy", default="unlisted",
                     choices=["public", "unlisted", "private"])
     ap.add_argument("--no-upload", action="store_true",

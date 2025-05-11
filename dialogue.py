@@ -8,6 +8,18 @@ from typing import List, Tuple
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]]:
+        # ---- 言語別：Aliceの導入セリフ --------------------
+    if lang == "ja":
+        intro = f"Alice: 今日は「{topic}」について話そう。"
+    elif lang == "pt":
+        intro = f"Alice: Vamos falar sobre {topic} hoje."
+    elif lang == "id":
+        intro = f"Alice: Yuk, kita ngobrol soal {topic} hari ini."
+    elif lang == "ko":
+        intro = f"Alice: 오늘은 {topic}에 대해 이야기해보자."
+    else:  # default: English
+        intro = f"Alice: Let's talk about {topic} today."
+
     """
     topic : 議論テーマ
     lang  : 'en', 'ja', 'pt', 'id' … 出力言語コード
@@ -15,14 +27,17 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
     戻り値: [(speaker, text), ...]  ※必ず len == turns*2
     """
     prompt = (
-        f"Stage a lively *discussion* between Alice and Bob in {lang}.\n"
-        f"Topic: \"{topic}\". Exactly {turns} exchanges (Alice starts).\n\n"
-        "• Each utterance should present a clear standpoint, argument, or rebuttal.\n"
-        "• Friendly tone but contrasting opinions when appropriate.\n"
-        "• 20–35 words per line.\n"
-        "• Return ONLY the dialogue, one line each, formatted as:\n"
-        "  Alice: ...\n  Bob:   ...\n"
+        f"Write a natural, podcast-style conversation between Alice and Bob in {lang}.\n"
+        f"Topic: \"{topic}\". Exactly {turns - 1} exchanges (start with Bob, since Alice already started).\n\n"
+        "• Each line should sound like real spoken language, relaxed and friendly.\n"
+        "• Use informal expressions, small reactions, or light humor if appropriate.\n"
+        "• Output ONLY the conversation in this strict format:\n"
+        "  Alice: <text>\n"
+        "  Bob:   <text>\n"
+        "• Use ASCII colons (:) with no extra spacing or explanations.\n"
+        "• Avoid headings, summaries, or anything besides the dialogue.\n"
     )
+
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
@@ -33,6 +48,9 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
         l.strip() for l in rsp.choices[0].message.content.splitlines()
         if l.strip().startswith(("Alice:", "Bob:"))
     ]
+    # ✅ Aliceの最初のセリフを追加（固定文）
+    first_line = f"Alice: Let's talk about {topic} today."
+    raw_lines = [intro] + raw_lines
 
     # ---- 必要数にトリミング / パディング --------------------------
     max_lines = turns * 2                     # 期待行数
