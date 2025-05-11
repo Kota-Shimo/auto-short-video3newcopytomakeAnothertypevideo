@@ -122,7 +122,7 @@ def build_video(
     fps=30,
     codec="libx264",
     audio_codec="aac",
-    temp_audiofile=str(Path("temp") / "temp-audio.m4"),
+    temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
     remove_temp=True
     )
 
