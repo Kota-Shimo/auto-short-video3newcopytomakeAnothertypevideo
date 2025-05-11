@@ -162,49 +162,35 @@ def line_to_voice(speaker: str, text: str, out: Path):
 PY
 # ───────────────────── podcast builder ──────────────────
 cat > topic_picker.py <<'PY'
-name: Auto-Podcast-Daily
+# topic_picker.py
+import random, datetime, os, openai
 
-on:
-  schedule:
-    - cron: "15 3 * * *"   # 毎日 UTC 03:15 ≒ JST 12:15
-  workflow_dispatch:       # 手動トリガーも可
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-jobs:
-  build-upload:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+SEED_TOPICS = [
+    "sustainable travel", "AI ethics", "classical music",
+    "space exploration", "healthy cooking", "mindfulness",
+]
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+def pick() -> str:
+    today = datetime.date.today().isoformat()
+    prompt = (
+        f"Suggest one fresh, trending topic for a podcast discussion on {today}. "
+        "Return only the topic phrase."
+    )
+    try:
+        rsp = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        topic = rsp.choices[0].message.content.strip()
+        return topic or random.choice(SEED_TOPICS)
+    except Exception:
+        return random.choice(SEED_TOPICS)
 
-      - name: Install deps
-        run: |
-          python -m pip install -U pip
-          pip install -r requirements.txt
-
-      - name: Restore YouTube token
-        env:
-          YT_TOKEN_B64: ${{ secrets.YOUTUBE_TOKEN_PKL }}
-        run: |
-          mkdir -p tokens
-          echo "$YT_TOKEN_B64" | base64 -d > tokens/token_default.pkl
-
-      - name: Pick topic
-        id: topic
-        run: |
-          TOPIC=$(python topic_picker.py)
-          echo "topic=$TOPIC" >> $GITHUB_OUTPUT
-
-      - name: Generate & upload
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
-        run: |
-          python main.py "${{ steps.topic.outputs.topic }}" --turns 6 --privacy public
+if __name__ == "__main__":
+    print(pick())
 
 PY
 
