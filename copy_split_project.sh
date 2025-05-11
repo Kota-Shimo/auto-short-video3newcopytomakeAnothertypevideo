@@ -32,11 +32,12 @@ UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
 # ── OpenAI TTS 用 (Alice 用, Bob 用) ───────────
 VOICE_MAP = {
     "en": ("alloy",   "echo"),     # 英語 : 落ち着いた男性 / 落ち着いた女性
-    "ja": ("nova",    "shimmer"),  # 日本語 : 女性 / 中性
+    "ja": ("nova",    "echo"),  # 日本語 : 女性 / 中性
     "pt": ("fable",   "onyx"),     # ポルトガル語 : やや明るい / 低め
     "id": ("alloy",   "fable"),    # インドネシア語 : 落ち着き / 明るめ
 }
 # 必要に応じてボイス名は自由に差し替えてください
+
 PY
 # ───────────────────── dialogue generator ───────────────
 cat > dialogue.py <<'PY'
@@ -50,6 +51,18 @@ from typing import List, Tuple
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]]:
+        # ---- 言語別：Aliceの導入セリフ --------------------
+    if lang == "ja":
+        intro = f"Alice: 今日は「{topic}」について話そう。"
+    elif lang == "pt":
+        intro = f"Alice: Vamos falar sobre {topic} hoje."
+    elif lang == "id":
+        intro = f"Alice: Yuk, kita ngobrol soal {topic} hari ini."
+    elif lang == "ko":
+        intro = f"Alice: 오늘은 {topic}에 대해 이야기해보자."
+    else:  # default: English
+        intro = f"Alice: Let's talk about {topic} today."
+
     """
     topic : 議論テーマ
     lang  : 'en', 'ja', 'pt', 'id' … 出力言語コード
@@ -57,14 +70,17 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
     戻り値: [(speaker, text), ...]  ※必ず len == turns*2
     """
     prompt = (
-        f"Stage a lively *discussion* between Alice and Bob in {lang}.\n"
-        f"Topic: \"{topic}\". Exactly {turns} exchanges (Alice starts).\n\n"
-        "• Each utterance should present a clear standpoint, argument, or rebuttal.\n"
-        "• Friendly tone but contrasting opinions when appropriate.\n"
-        "• 20–35 words per line.\n"
-        "• Return ONLY the dialogue, one line each, formatted as:\n"
-        "  Alice: ...\n  Bob:   ...\n"
+        f"Write a natural, podcast-style conversation between Alice and Bob in {lang}.\n"
+        f"Topic: \"{topic}\". Exactly {turns - 1} exchanges (start with Bob, since Alice already started).\n\n"
+        "• Each line should sound like real spoken language, relaxed and friendly.\n"
+        "• Use informal expressions, small reactions, or light humor if appropriate.\n"
+        "• Output ONLY the conversation in this strict format:\n"
+        "  Alice: <text>\n"
+        "  Bob:   <text>\n"
+        "• Use ASCII colons (:) with no extra spacing or explanations.\n"
+        "• Avoid headings, summaries, or anything besides the dialogue.\n"
     )
+
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
@@ -75,6 +91,9 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
         l.strip() for l in rsp.choices[0].message.content.splitlines()
         if l.strip().startswith(("Alice:", "Bob:"))
     ]
+    # ✅ Aliceの最初のセリフを追加（固定文）
+    first_line = f"Alice: Let's talk about {topic} today."
+    raw_lines = [intro] + raw_lines
 
     # ---- 必要数にトリミング / パディング --------------------------
     max_lines = turns * 2                     # 期待行数
@@ -163,35 +182,70 @@ PY
 # ───────────────────── podcast builder ──────────────────
 cat > topic_picker.py <<'PY'
 # topic_picker.py
-import random, datetime, os, openai
+"""
+Pick TODAY’s podcast/video topic.
+
+1. できれば GPT-4o で “今日っぽい” キーワードを 1 行だけ取得  
+2. API 呼び出しが失敗したら SEED_TOPICS からランダムでフォールバック
+"""
+
+import random
+import datetime
+import os
+import openai
+import re
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-SEED_TOPICS = [
-    "sustainable travel", "AI ethics", "classical music",
-    "space exploration", "healthy cooking", "mindfulness",
+# ── フォールバック用プリセット ─────────────────────────
+SEED_TOPICS: list[str] = [
+    # Tech & Science
+    "AI ethics", "quantum computing", "space exploration",
+    # Lifestyle & Culture
+    "sustainable travel", "mindfulness", "plant-based diets",
+    # Arts
+    "classical music", "digital illustration", "street photography",
 ]
 
+# ────────────────────────────────────────────────────────
+def _clean(raw: str) -> str:
+    """
+    GPT 応答に余計な「Sure, here is…」などが混ざっても
+    先頭行だけを抜き取り、引用符・句読点を削ぐ。
+    """
+    first_line = raw.strip().splitlines()[0]
+    topic = re.sub(r'^[\"“”\'\-•\s]*', "", first_line)   # 先頭の記号/空白
+    topic = re.sub(r'[\"“”\'\s]*$', "", topic)           # 末尾の記号/空白
+    return topic
+
+
 def pick() -> str:
+    """Return one short topic phrase (ASCII/UTF-8)."""
     today = datetime.date.today().isoformat()
+
     prompt = (
-        f"Suggest one fresh, trending topic for a podcast discussion on {today}. "
-        "Return only the topic phrase."
+        f"Today is {today}. Give me ONE short, trending topic idea for a"
+        " 60-90-second educational video. **Return ONLY the topic phrase** –"
+        " no explanations, no punctuation, no quotation marks."
     )
+
     try:
         rsp = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
+            timeout=20,
         )
-        topic = rsp.choices[0].message.content.strip()
+        topic = _clean(rsp.choices[0].message.content)
         return topic or random.choice(SEED_TOPICS)
-    except Exception:
+
+    except Exception as e:  # ネットワーク・キー無効など
+        # ログに残す場合は logging を使う
         return random.choice(SEED_TOPICS)
+
 
 if __name__ == "__main__":
     print(pick())
-
 PY
 
 cat > tts_openai.py <<'PY'
@@ -891,10 +945,8 @@ cat > main.py <<'PY'
 # ======================= main.py ==========================
 #!/usr/bin/env python
 """
-main.py – GPT で会話 → OpenAI TTS → 多段字幕付き縦動画 (1080×1920)
-          combos.yaml の組み合わせごとに生成し、
-          ── デフォルト: YouTube へ自動アップロード
-          ── --no-upload を付けるとローカル出力のみ
+main.py – GPT で会話 → OpenAI TTS → 多段字幕付き動画
+          combos.yaml の組み合わせごとに生成し、必要なら自動アップロード。
 """
 from datetime import datetime
 import argparse, logging, yaml, re
@@ -911,7 +963,8 @@ from podcast         import concat_mp3
 from bg_image        import fetch as fetch_bg
 from subtitle_video  import build_video
 from upload_youtube  import upload
-from audio_fx        import enhance   # 音質フィルタ
+from audio_fx        import enhance
+from thumbnail       import make_thumbnail
 
 GPT = OpenAI()
 
@@ -921,8 +974,7 @@ with open(BASE / "combos.yaml", encoding="utf-8") as f:
 
 # ── TEMP を毎回空に ───────────────────────────────
 def reset_temp():
-    if TEMP.exists():
-        rmtree(TEMP)
+    if TEMP.exists(): rmtree(TEMP)
     TEMP.mkdir(exist_ok=True)
 
 # ── タイトル整形 ───────────────────────────────────
@@ -932,16 +984,15 @@ def sanitize_title(raw: str) -> str:
 
 # ── 共通: プライマリ言語決定 ────────────────────────
 def _primary_lang(audio_lang: str, subs: list[str]) -> str:
-    """字幕が 2 行以上あれば 2 行目を優先、無ければ音声言語"""
     return subs[1] if len(subs) > 1 else audio_lang
 
 # ── GPT タイトル ──────────────────────────────────
-def make_title(topic: str, audio_lang: str, subs: list[str]) -> str:
+def make_title(topic, audio_lang, subs):
     primary = _primary_lang(audio_lang, subs)
     prompt  = (
-        "You are a YouTube Shorts copywriter.\n"
-        "Write a catchy title (≤55 ASCII or 28 JP chars).\n"
-        f"Main part in {primary.upper()}, then ' | ' and an English gloss, end with #Shorts.\n"
+        "You are a YouTube video copywriter.\n"
+        "Write a clear and engaging title (≤55 ASCII or 28 JP characters).\n"
+        f"Main part in {primary.upper()}, then ' | ' and an English gloss.\n"
         f"Topic: {topic}"
     )
     rsp = GPT.chat.completions.create(
@@ -952,30 +1003,39 @@ def make_title(topic: str, audio_lang: str, subs: list[str]) -> str:
     return sanitize_title(rsp.choices[0].message.content.strip())
 
 # ── GPT 説明欄 ────────────────────────────────────
-def make_desc(topic: str, audio_lang: str, subs: list[str]) -> str:
+def make_desc(topic, audio_lang, subs):
     primary = _primary_lang(audio_lang, subs)
-    prompt = (
+
+    # --- 本文を生成 ---
+    prompt_desc = (
         f"Write one sentence (≤90 characters) in {primary.upper()} summarising "
         f'\"{topic}\" and ending with a short call-to-action.'
     )
     rsp = GPT.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": prompt_desc}],
         temperature=0.5,
     )
     base = rsp.choices[0].message.content.strip()
 
-    hashtags = ["#Shorts", "#LanguageLearning"]
-    if primary != "en":
-        hashtags.append(f"#Learn{primary.upper()}")
-    return f"{base} {' '.join(hashtags[:3])}"
+    # --- ハッシュタグをその国の言語で生成 ---
+    prompt_tags = (
+        f"List 2 or 3 popular hashtags in {primary.upper()} used by language learners studying {primary.upper()}. "
+        "Respond ONLY with the hashtags, separated by spaces."
+    )
+    tag_rsp = GPT.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt_tags}],
+        temperature=0.3,
+    )
+    hashtags = tag_rsp.choices[0].message.content.strip().replace("\n", " ")
 
-# ── メタ tags 生成 ─────────────────────────────────
-LANG_NAME = {
-    "en": "English", "pt": "Portuguese", "id": "Indonesian",
-    "ja": "Japanese", "ko": "Korean", "es": "Spanish"
-}
-def make_tags(topic: str, audio_lang: str, subs: list[str]) -> list[str]:
+    return f"{base} {hashtags}"
+
+# ── メタ tags ─────────────────────────────────────
+LANG_NAME = {"en": "English","pt":"Portuguese","id":"Indonesian",
+             "ja":"Japanese","ko":"Korean","es":"Spanish"}
+def make_tags(topic, audio_lang, subs):
     tags = [topic, "language learning", "Shorts",
             f"{LANG_NAME.get(audio_lang,'')} speaking"]
     for code in subs[1:]:
@@ -984,26 +1044,32 @@ def make_tags(topic: str, audio_lang: str, subs: list[str]) -> list[str]:
     return list(dict.fromkeys(tags))[:15]
 
 # ── 全コンボ処理 ───────────────────────────────────
-def run_all(topic: str, turns: int, privacy: str, do_upload: bool):
+def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload):
     for combo in COMBOS:
         run_one(topic, turns,
                 combo["audio"], combo["subs"],
+                fsize_top, fsize_bot,
                 yt_privacy=privacy,
-                account   =combo.get("account", "default"),
+                account   =combo.get("account","default"),
                 do_upload =do_upload)
 
 # ── 単一コンボ処理 ─────────────────────────────────
-def run_one(topic: str, turns: int, audio_lang: str, subs: list[str],
-            yt_privacy: str, account: str, do_upload: bool):
+def run_one(topic, turns, audio_lang, subs,
+            fsize_top, fsize_bot,
+            yt_privacy, account, do_upload):
 
     reset_temp()
 
     # 1) 会話スクリプト
     dialogue = make_dialogue(topic, audio_lang, turns)
 
-    # 2) 音声合成 & 翻訳
+    # 2) TTS & 翻訳
     mp_parts, durations, sub_rows = [], [], [[] for _ in subs]
     for i, (spk, line) in enumerate(dialogue, 1):
+        if line.strip() in ("...", ""):
+            print(f"⚠️ スキップ: {spk} のセリフが無効（{line}）")
+            continue  # 音声も字幕も生成しない
+
         mp = TEMP / f"{i:02d}.mp3"
         speak(audio_lang, spk, line, mp)
         mp_parts.append(mp)
@@ -1011,18 +1077,29 @@ def run_one(topic: str, turns: int, audio_lang: str, subs: list[str],
         for r, lang in enumerate(subs):
             sub_rows[r].append(line if lang == audio_lang else translate(line, lang))
 
-    concat_mp3(mp_parts, TEMP / "full_raw.mp3")      # まず生音声を結合
-    enhance(TEMP / "full_raw.mp3", TEMP / "full.mp3")# 高音質化を適用
+    concat_mp3(mp_parts, TEMP / "full_raw.mp3")
+    enhance(TEMP / "full_raw.mp3", TEMP / "full.mp3")
 
     # 3) 背景画像
     bg_png = TEMP / "bg.png"; fetch_bg(topic, bg_png)
 
+    # 3.5) サムネイル
+    primary_lang = _primary_lang(audio_lang, subs)
+    thumb = TEMP / "thumbnail.jpg"
+    make_thumbnail(topic, primary_lang, thumb)
+
     # 4) 動画生成
     stamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
     outfile = OUTPUT / f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
-    lines   = [(spk, *[row[i] for row in sub_rows], dur)
-               for i, ((spk, _), dur) in enumerate(zip(dialogue, durations))]
-    build_video(lines, bg_png, TEMP / "full.mp3", outfile, rows=len(subs))
+    # 有効な行だけで再構築（durationsとsub_rowsの長さに基づく）
+    valid_dialogue = [d for d in dialogue if d[1].strip() not in ("...", "")]
+    lines = [(spk, *[row[i] for row in sub_rows], dur)
+            for i, ((spk, _), dur) in enumerate(zip(valid_dialogue, durations))]
+    
+    build_video(lines, bg_png, TEMP / "full.mp3", outfile,
+                rows=len(subs),
+                fsize_top=fsize_top,
+                fsize_bot=fsize_bot)
     logging.info("✅ Video saved: %s", outfile.name)
 
     if not do_upload:
@@ -1034,20 +1111,24 @@ def run_one(topic: str, turns: int, audio_lang: str, subs: list[str],
     desc  = make_desc(topic, audio_lang, subs)
     tags  = make_tags(topic, audio_lang, subs)
     upload(outfile, title=title, desc=desc, tags=tags,
-           privacy=yt_privacy, account=account)
+           privacy=yt_privacy, account=account,
+           thumbnail=thumb)
 
 # ── CLI ───────────────────────────────────────────
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("topic", help="会話テーマ (例: 'Japanese cuisine')")
-    ap.add_argument("--turns", type=int, default=8)
+    ap.add_argument("topic",               help="会話テーマ")
+    ap.add_argument("--turns", type=int,   default=8, help="往復回数 (1=Alice+Bob)")
+    ap.add_argument("--fsize-top", type=int, default=65, help="上段字幕フォントサイズ")
+    ap.add_argument("--fsize-bot", type=int, default=60, help="下段字幕フォントサイズ")
     ap.add_argument("--privacy", default="unlisted",
                     choices=["public", "unlisted", "private"])
     ap.add_argument("--no-upload", action="store_true",
-                    help="動画を生成するだけで YouTube へはアップロードしない")
+                    help="動画生成のみ (YouTube へはアップしない)")
     args = ap.parse_args()
 
     run_all(args.topic, turns=args.turns,
+            fsize_top=args.fsize_top, fsize_bot=args.fsize_bot,
             privacy=args.privacy, do_upload=(not args.no_upload))
 # =========================================================
 PY

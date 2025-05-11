@@ -117,5 +117,13 @@ def build_video(
         clips.append(comp)
 
     video = concatenate_videoclips(clips, method="compose").with_audio(AudioFileClip(voice_mp3))
-    video.write_videofile(out_mp4, fps=30, codec="libx264", audio_codec="aac")
+    video.write_videofile(
+    str(out_mp4),
+    fps=30,
+    codec="libx264",
+    audio_codec="aac",
+    temp_audiofile=str(Path("temp") / "temp-audio.m4"),
+    remove_temp=True
+    )
+
 # =====================================================
