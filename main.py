@@ -6,6 +6,7 @@ main.py – GPT で会話 → OpenAI TTS → 多段字幕付き動画
 """
 from datetime import datetime
 import argparse, logging, yaml, re
+import json                     # ★ 追加
 from pathlib import Path
 from shutil import rmtree
 from pydub import AudioSegment
@@ -136,6 +137,23 @@ def run_one(topic, turns, audio_lang, subs,
     concat_mp3(mp_parts, TEMP / "full_raw.mp3")
     enhance(TEMP / "full_raw.mp3", TEMP / "full.mp3")
 
+        # -------- lines.json を書き出して終了するモード --------
+    if getattr(args, "lines_only", False):
+        # dialogue から「しゃべった行」だけを再構築
+        valid = [
+            {
+                "speaker": spk,
+                "text": line.strip(),
+                "duration": dur
+            }
+            for (spk, line), dur in zip(dialogue, durations)
+            if line.strip() not in ("...", "")
+        ]
+        with open(TEMP / "lines.json", "w", encoding="utf-8") as f:
+            json.dump(valid, f, ensure_ascii=False, indent=2)
+        logging.info("📝 lines.json exported (%d lines) –– end.", len(valid))
+        return 
+
     # 3) 背景画像
     bg_png = TEMP / "bg.png"; fetch_bg(topic, bg_png)
 
@@ -179,6 +197,8 @@ if __name__ == "__main__":
     ap.add_argument("--fsize-bot", type=int, default=60, help="下段字幕フォントサイズ")
     ap.add_argument("--privacy", default="unlisted",
                     choices=["public", "unlisted", "private"])
+    ap.add_argument("--lines-only", action="store_true",
+                    help="音声と lines.json だけ出力し、動画もアップロードも行わない")
     ap.add_argument("--no-upload", action="store_true",
                     help="動画生成のみ (YouTube へはアップしない)")
     args = ap.parse_args()
