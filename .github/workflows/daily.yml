@@ -1,10 +1,13 @@
 name: Auto-Podcast-Daily
 
 on:
-  # ⏰ 毎日 JST 11:00（＝UTC 02:00）に自動実行
+  # ① JST 09:00 ② JST 15:00 ③ JST 21:00
   schedule:
-    - cron: '0 2 * * *'
-  # ▶️ 手動トリガーも可
+    - cron: '0 0 * * *'   # UTC 00:00 → JST 09:00
+    - cron: '0 6 * * *'   # UTC 06:00 → JST 15:00
+    - cron: '0 12 * * *'  # UTC 12:00 → JST 21:00
+
+  # ▶️ 手動トリガー（Run workflow ボタン）
   workflow_dispatch:
 
 jobs:
