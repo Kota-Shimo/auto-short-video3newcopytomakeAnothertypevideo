@@ -6,7 +6,7 @@ python chunk_builder.py path/to/lines.json bg.png final_output.mp4
 import json, math, subprocess, sys
 from pathlib import Path
 
-from subtitle_video import build_video, wrap  # 既存関数を再利用
+from subtitle_video import build_video  # 既存関数を再利用
 
 # ---------------- 受け取り ----------------
 script_json, bg_png, final_mp4 = map(Path, sys.argv[1:4])
