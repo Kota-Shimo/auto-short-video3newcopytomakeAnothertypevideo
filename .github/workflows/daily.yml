@@ -14,7 +14,6 @@ concurrency:                     # ▼ 追加
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120         # ▼ 長めに確保（任意）
 
     steps:
     # ① 取得
