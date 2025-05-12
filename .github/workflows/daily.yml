@@ -7,10 +7,6 @@ on:
   # 手動トリガー
   workflow_dispatch:
 
-concurrency:                     # ▼ 追加
-  group: auto-podcast-${{ github.ref }}
-  cancel-in-progress: false      # ← 古い Run をキャンセルしない
-
 jobs:
   build:
     runs-on: ubuntu-latest
