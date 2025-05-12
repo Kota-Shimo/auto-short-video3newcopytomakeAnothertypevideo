@@ -3,16 +3,24 @@ name: Auto-Podcast-Daily
 on:
   # ① JST09:00 ② JST15:00 ③ JST21:00
   schedule:
-    - cron: '0 12 * * *'   # UTC12:00
-  # 手動トリガー
-  workflow_dispatch:
+    - cron: '0 0  * * *'    # UTC00:00 → JST09:00
+    - cron: '0 6  * * *'    # UTC06:00 → JST15:00
+    - cron: '0 12 * * *'    # UTC12:00 → JST21:00
+  workflow_dispatch:        # 手動トリガー
+
+# ───────── concurrency ─────────
+concurrency:
+  group: auto-podcast-${{ github.ref }}
+  cancel-in-progress: false   # 古い Run を殺さない
+# ──────────────────────────────
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360       # 長めに確保（省略可）
 
     steps:
-    # ① 取得
+    # ① リポジトリ取得
     - name: ⬇️ Checkout repo
       uses: actions/checkout@v4
 
@@ -25,7 +33,7 @@ jobs:
     # ③ 依存ライブラリ
     - name: 📦 Install requirements
       run: |
-        sudo apt-get update -y
+        sudo apt-get update -y      # FFmpeg
         sudo apt-get install -y ffmpeg
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
@@ -57,4 +65,4 @@ jobs:
         UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
       run: |
         python main.py "${{ steps.topic.outputs.topic }}" \
-               --turns 90 --privacy public
+               --turns 180 --privacy public
