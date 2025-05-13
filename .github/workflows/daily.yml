@@ -71,9 +71,9 @@ jobs:
     # ⑥b 60ターンごとにチャンク分割レンダリング
     - name: ✂️ Split & render chunks
       run: |
-        python chunk_builder.py temp/lines.json \
-              --chunk 60 \
-              --target-dir output
+          python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
+                 --chunk 60 --out output/long_video.mp4
+
 
     # ⑥c 出来た mp4 を順にアップロード
     - name: 🚀 Upload each mp4
