@@ -27,7 +27,7 @@ for idx, chunk in enumerate(parts):
 
     print(f"▶️ part {idx+1}/{len(parts)}  行数={len(chunk)}")
     build_video(chunk, bg_png, audio, mp4,
-                rows=2, fsize_top=F_TOP, fsize_bot=F_BOT)
+                rows=2,)
     part_files.append(mp4)
 
 # ---------------- ffmpeg concat ----------------------
