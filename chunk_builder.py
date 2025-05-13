@@ -5,62 +5,74 @@
 
 usage:
   python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
-        --chunk 60 --rows 2 --out output/final_long.mp4
+        --chunk 60 --rows 2 --fsize-top 65 --fsize-bot 60 \
+        --out output/final_long.mp4
 """
+import argparse
+import json
+import subprocess
+import tempfile
+import shutil
 from pathlib import Path
-import argparse, json, subprocess, tempfile, shutil
 from os import makedirs
 
-from subtitle_video import build_video            # 既存関数
+from subtitle_video import build_video  # 既存の字幕つき動画生成関数
 
-# ──────────── CLI ─────────────────────
+# ───────────────────── CLI ─────────────────────
 ap = argparse.ArgumentParser()
-ap.add_argument("lines_json")
-ap.add_argument("full_mp3")
-ap.add_argument("bg_png")
-ap.add_argument("--out",        default="output/final.mp4")
-ap.add_argument("--chunk", type=int, default=40, help="1 チャンクあたりの行数")
-ap.add_argument("--rows",  type=int, default=2,  help="字幕段数")
-ap.add_argument("--fsize-top", type=int, default=None)
-ap.add_argument("--fsize-bot", type=int, default=None)
+ap.add_argument("lines_json",  help="lines.json: [[spk, line1, line2, dur], ...]")
+ap.add_argument("full_mp3",    help="通し音声ファイル (mp3)")
+ap.add_argument("bg_png",      help="背景画像 (1920x1080 など)")
+ap.add_argument("--out",       default="output/final.mp4", help="最終出力先 mp4")
+ap.add_argument("--chunk",     type=int, default=40, help="1 チャンクあたりの行数")
+ap.add_argument("--rows",      type=int, default=2,  help="字幕段数 (上段=音声言語, 下段=翻訳など)")
+ap.add_argument("--fsize-top", type=int, default=None, help="上段字幕フォントサイズ")
+ap.add_argument("--fsize-bot", type=int, default=None, help="下段字幕フォントサイズ")
 args = ap.parse_args()
 
 SCRIPT     = Path(args.lines_json)
 FULL_MP3   = Path(args.full_mp3)
 BG_PNG     = Path(args.bg_png)
 FINAL_MP4  = Path(args.out)
-LINES_PER  = args.chunk
+
+LINES_PER  = args.chunk   # 分割チャンクサイズ
 ROWS       = args.rows
 
 if not (SCRIPT.exists() and FULL_MP3.exists() and BG_PNG.exists()):
-    raise SystemExit("❌ 必要なファイルが見つかりません")
+    raise SystemExit("❌ 必要なファイルが見つかりません。引数を確認してください。")
 
 # 出力先ディレクトリを用意
 makedirs(FINAL_MP4.parent, exist_ok=True)
 
-# ──────────── 準備 ─────────────────────
+# ───────────────────── 処理開始 ─────────────────────
 TEMP = Path(tempfile.mkdtemp(prefix="chunks_"))
-print("🗂️  temp dir =", TEMP)
+print("🗂️  Temp dir =", TEMP)
 
-lines = json.loads(SCRIPT.read_text())            # [[spk,line1,line2,dur]...]
+# lines.json 読み込み: [[spk, line1, line2, dur], ...] の形
+lines = json.loads(SCRIPT.read_text())
+
+# lines.json を chunk ごとに分割
 parts = [lines[i:i+LINES_PER] for i in range(0, len(lines), LINES_PER)]
 
-# full.mp3 を duration 情報でカットして各チャンクに対応させる
-durations  = [row[-1] for row in lines]           # 各行の秒数
+# durations: 各行の秒数を読み取って累積和を作る
+durations  = [row[-1] for row in lines]  # row[-1] は dur
 cumulative = [0]
 for d in durations:
-    cumulative.append(cumulative[-1] + d)         # 累積時間
+    cumulative.append(cumulative[-1] + d)  # 累積
 
 part_files = []
 for idx, chunk in enumerate(parts):
+    # start〜end の秒数を計算
     t_start = cumulative[idx * LINES_PER]
-    t_end   = cumulative[idx * LINES_PER + len(chunk)]   # ← 修正点
+    t_end   = cumulative[idx * LINES_PER + len(chunk)]
     t_len   = t_end - t_start
 
+    # チャンク用の音声 mp3
     audio_part = TEMP / f"audio_{idx}.mp3"
+    # 出力 mp4
     mp4_part   = TEMP / f"part_{idx:02d}.mp4"
 
-    # ffmpeg -ss -t で音声を切り出し
+    # ffmpeg で通し音声(full.mp3)から必要部分だけ切り出し
     subprocess.run([
         "ffmpeg", "-y",
         "-ss", f"{t_start}", "-t", f"{t_len}",
@@ -68,18 +80,29 @@ for idx, chunk in enumerate(parts):
         "-acodec", "copy", str(audio_part)
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
-    print(f"▶️ part {idx+1}/{len(parts)}  行数={len(chunk)}  "
-          f"start={t_start:.1f}s len={t_len:.1f}s")
+    print(f"▶️ part {idx+1}/{len(parts)} | 行数={len(chunk)}"
+          f" | start={t_start:.1f}s len={t_len:.1f}s")
 
-    extra = {}
-    if args.fsize_top: extra["fsize_top"] = args.fsize_top
-    if args.fsize_bot: extra["fsize_bot"] = args.fsize_bot
+    # フォントサイズを可変にしたい場合: argparse で受け取ってオプション連想配列にまとめる
+    extra_args = {}
+    if args.fsize_top:
+        extra_args["fsize_top"] = args.fsize_top
+    if args.fsize_bot:
+        extra_args["fsize_bot"] = args.fsize_bot
 
-    build_video(chunk, BG_PNG, audio_part, mp4_part,
-                rows=ROWS, **extra)
+    # 字幕つき動画を生成
+    build_video(
+        lines=chunk,
+        bg_path=BG_PNG,
+        voice_mp3=audio_part,
+        out_mp4=mp4_part,
+        rows=ROWS,
+        **extra_args  # fsize_top, fsize_bot を渡す
+    )
+
     part_files.append(mp4_part)
 
-# ──────────── concat ───────────────────
+# ───────────────────── concat ─────────────────────
 concat_txt = TEMP / "concat.txt"
 concat_txt.write_text("\n".join(f"file '{p.resolve()}'" for p in part_files))
 
@@ -90,7 +113,8 @@ subprocess.run([
     "-c", "copy", str(FINAL_MP4)
 ], check=True)
 
-print("✅ 完成:", FINAL_MP4)
+print("✅ 完了:", FINAL_MP4)
 
-# 後始末（不要ならコメントアウトしておく）
-# shutil.rmtree(TEMP)
+# 後始末（不要ならコメントアウトして残しても良い）
+shutil.rmtree(TEMP)
+print("🧹 Temp dir removed →", TEMP)
