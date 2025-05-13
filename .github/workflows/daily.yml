@@ -71,8 +71,10 @@ jobs:
     # ⑥b 60ターンごとにチャンク分割レンダリング
     - name: ✂️ Split & render chunks
       run: |
-          python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
-                 --chunk 60 --out output/long_video.mp4
+         mkdir -p output                   # ← 追加
+         python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
+                --chunk 60 --out output/long_video.mp4
+
 
 
     # ⑥c 出来た mp4 を順にアップロード
@@ -80,7 +82,5 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
-        for f in output/*.mp4; do
-          echo "▶️ Upload $f"
-          python upload_youtube.py "$f" --privacy public
-        done
+        echo "▶️ Upload output/long_video.mp4"
+        python upload_youtube.py output/long_video.mp4 --privacy public
