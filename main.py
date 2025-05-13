@@ -101,19 +101,22 @@ def make_tags(topic, audio_lang, subs):
     return list(dict.fromkeys(tags))[:15]
 
 # ── 全コンボ処理 ───────────────────────────────────
-def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload):
+def run_all(topic, turns, fsize_top, fsize_bot, 
+            privacy, do_upload, lines_only):          # ★ 追加
     for combo in COMBOS:
         run_one(topic, turns,
                 combo["audio"], combo["subs"],
                 fsize_top, fsize_bot,
                 yt_privacy=privacy,
                 account   =combo.get("account","default"),
-                do_upload =do_upload)
+                do_upload =do_upload,
+                lines_only=lines_only)
 
 # ── 単一コンボ処理 ─────────────────────────────────
 def run_one(topic, turns, audio_lang, subs,
             fsize_top, fsize_bot,
-            yt_privacy, account, do_upload):
+            yt_privacy, account, 
+            do_upload, lines_only): 
 
     reset_temp()
 
@@ -203,7 +206,11 @@ if __name__ == "__main__":
                     help="動画生成のみ (YouTube へはアップしない)")
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+
     run_all(args.topic, turns=args.turns,
             fsize_top=args.fsize_top, fsize_bot=args.fsize_bot,
-            privacy=args.privacy, do_upload=(not args.no_upload))
-# =========================================================
+            privacy=args.privacy,
+            do_upload=(not args.no_upload) and (not args.lines_only),
+            lines_only=args.lines_only)          # ★ 追加
