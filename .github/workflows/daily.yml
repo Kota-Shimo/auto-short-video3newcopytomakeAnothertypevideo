@@ -8,79 +8,75 @@ on:
     - cron: '0 12 * * *'    # UTC12:00 → JST21:00
   workflow_dispatch:        # 手動トリガー
 
-# ───────── concurrency ─────────
 concurrency:
   group: auto-podcast-${{ github.ref }}
-  cancel-in-progress: false   # 古い Run を殺さない
-# ──────────────────────────────
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360       # 長めに確保（省略可）
+    timeout-minutes: 360
 
     steps:
-    # ① リポジトリ取得
-    - name: ⬇️ Checkout repo
-      uses: actions/checkout@v4
+      # ① リポジトリ取得
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
 
-    # ② Python
-    - name: 🐍 Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      # ② Python
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    # ③ 依存ライブラリ
-    - name: 📦 Install requirements
-      run: |
-        sudo apt-get update -y      # FFmpeg
-        sudo apt-get install -y ffmpeg
-        python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
+      # ③ 依存ライブラリ
+      - name: 📦 Install requirements
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-    # ④ YouTube OAuth トークン
-    - name: 🔑 Restore YouTube tokens
-      env:
-        YT_ACC1: ${{ secrets.YT_TOKEN_ACC1 }}
-        YT_ACC4: ${{ secrets.YT_TOKEN_ACC4 }}
-        YT_ACC5: ${{ secrets.YT_TOKEN_ACC5 }}
-        YT_ACC6: ${{ secrets.YT_TOKEN_ACC6 }}
-      run: |
-        mkdir -p tokens
-        echo "$YT_ACC1" | base64 -d > tokens/token_acc1.pkl
-        echo "$YT_ACC4" | base64 -d > tokens/token_acc4.pkl
-        echo "$YT_ACC5" | base64 -d > tokens/token_acc5.pkl
-        echo "$YT_ACC6" | base64 -d > tokens/token_acc6.pkl
+      # ④ YouTube OAuth トークン
+      - name: 🔑 Restore YouTube tokens
+        env:
+          YT_ACC1: ${{ secrets.YT_TOKEN_ACC1 }}
+          YT_ACC4: ${{ secrets.YT_TOKEN_ACC4 }}
+          YT_ACC5: ${{ secrets.YT_TOKEN_ACC5 }}
+          YT_ACC6: ${{ secrets.YT_TOKEN_ACC6 }}
+        run: |
+          mkdir -p tokens
+          echo "$YT_ACC1" | base64 -d > tokens/token_acc1.pkl
+          echo "$YT_ACC4" | base64 -d > tokens/token_acc4.pkl
+          echo "$YT_ACC5" | base64 -d > tokens/token_acc5.pkl
+          echo "$YT_ACC6" | base64 -d > tokens/token_acc6.pkl
 
-    # ⑤ トピック決定
-    - name: 📝 Pick today’s topic
-      id: topic
-      run: |
-        echo "topic=$(python topic_picker.py)" >> "$GITHUB_OUTPUT"
+      # ⑤ トピック決定
+      - name: 📝 Pick today’s topic
+        id: topic
+        run: |
+          echo "topic=$(python topic_picker.py)" >> "$GITHUB_OUTPUT"
 
-    # ⑥ 動画生成 & アップロード
-    # ⑥a GPT＋TTS（音声＋lines.json まで／動画はまだ作らない）
-    - name: 🗣️ Build script & audio
-      env:
-        OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
-        UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
-      run: |
-        python main.py "${{ steps.topic.outputs.topic }}" \
-               --turns 120 --lines-only --privacy private
+      # ⑥ 動画生成 & アップロード
+      ## ⑥a GPT＋TTS（音声＋lines.json まで／動画はまだ作らない）
+      - name: 🗣️ Build script & audio
+        env:
+          OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+        run: |
+          python main.py "${{ steps.topic.outputs.topic }}" \
+                 --turns 120 --lines-only --privacy private
 
-    # ⑥b 60ターンごとにチャンク分割レンダリング
-    - name: ✂️ Split & render chunks
-      run: |
-         mkdir -p output                   # ← 追加
-         python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
-                --chunk 60 --out output/long_video.mp4
+      ## ⑥b 60ターンごとにチャンク分割レンダリング
+      - name: ✂️ Split & render chunks
+        run: |
+          mkdir -p output
+          python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
+                 --chunk 60 --out output/long_video.mp4
 
-
-
-    # ⑥c 出来た mp4 を順にアップロード
-    - name: 🚀 Upload each mp4
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: |
-        echo "▶️ Upload output/long_video.mp4"
-        python upload_youtube.py output/long_video.mp4 --privacy public
+      ## ⑥c 出来た mp4 をアップロード
+      - name: 🚀 Upload each mp4
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "▶️ Upload output/long_video.mp4"
+          python upload_youtube.py output/long_video.mp4 --privacy public
