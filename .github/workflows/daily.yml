@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 480
 
     steps:
       # ① リポジトリ取得
@@ -63,6 +63,6 @@ jobs:
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
         run: |
           python main.py "${{ steps.topic.outputs.topic }}" \
-            --turns 200 \
+            --turns 400 \
             --privacy public \
             --chunk 40
