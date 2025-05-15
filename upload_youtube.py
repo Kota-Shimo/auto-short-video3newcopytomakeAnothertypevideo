@@ -7,11 +7,15 @@ YouTube へ動画をアップロードするユーティリティ。
 from pathlib import Path
 from typing import List, Optional
 import pickle, re, logging
+import time  # ★ 待機のため追加
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http      import MediaFileUpload
 from google.auth.transport.requests import Request
+
+# 403 や 404 エラー捕捉用
+from googleapiclient.errors import HttpError
 
 # ── OAuth / API 設定 ─────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -19,9 +23,8 @@ DEFAULT_TOKEN_DIR = Path("tokens")          # トークン保存フォルダ
 DEFAULT_TOKEN_DIR.mkdir(exist_ok=True)
 # ────────────────────────────────────────────────────
 
-
 # ------------------------------------------------------
-# ✅ 追加: カスタムサムネイルをセットするヘルパー
+# ✅ カスタムサムネイルをセットするヘルパー
 def _set_thumbnail(service, video_id: str, thumb_path: Path):
     """アップロード済み video_id に thumb_path を適用"""
     service.thumbnails().set(
@@ -29,7 +32,6 @@ def _set_thumbnail(service, video_id: str, thumb_path: Path):
         media_body=str(thumb_path)
     ).execute()
 # ------------------------------------------------------
-
 
 def _get_service(account_label: str = "default"):
     """
@@ -69,7 +71,7 @@ def upload(
     tags: Optional[List[str]] = None,
     privacy: str = "public",
     account: str = "default",
-    thumbnail: Path | None = None,          # ★ 追加
+    thumbnail: Path | None = None,  # ★ カスタムサムネ
 ):
     """
     video_path : Path to .mp4
@@ -92,7 +94,7 @@ def upload(
             "title":       title,
             "description": desc,
             "tags":        tags or [],
-            "categoryId":  "27",        # 27 = Education
+            "categoryId":  "27",  # 27 = Education
         },
         "status": {
             "privacyStatus": privacy,
@@ -111,10 +113,16 @@ def upload(
     url = f"https://youtu.be/{video_id}"
     print("✅ YouTube Upload Done →", url)
 
-    # ---- カスタムサムネイル ----
+    # ---- カスタムサムネイル (待ち時間 + try/except) ----
     if thumbnail and thumbnail.exists():
-        _set_thumbnail(service, video_id, thumbnail)
-        print("🖼  Custom thumbnail set.")
+        # 動画アップ後すぐは処理が不安定な場合も。10秒程度待機。
+        time.sleep(10)
+        try:
+            _set_thumbnail(service, video_id, thumbnail)
+            print("🖼  Custom thumbnail set.")
+        except HttpError as e:
+            # 403 などが出ても致命エラーにはせず、ログに留める。
+            print(f"⚠️  Thumbnail set failed: {e}")
 
     logging.info("YouTube URL: %s (account=%s)", url, account)
     return url
