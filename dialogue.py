@@ -8,7 +8,7 @@ from typing import List, Tuple
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]]:
-        # ---- 言語別：Aliceの導入セリフ --------------------
+    # ---- 言語別：Aliceの導入セリフ ----
     if lang == "ja":
         intro = f"Alice: 今日は「{topic}」について話そう。"
     elif lang == "pt":
@@ -20,46 +20,53 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
     else:  # default: English
         intro = f"Alice: Let's talk about {topic} today."
 
-    """
-    topic : 議論テーマ
-    lang  : 'en', 'ja', 'pt', 'id' … 出力言語コード
-    turns : Alice→Bob の往復回数（1 往復 = 2 行）
-    戻り値: [(speaker, text), ...]  ※必ず len == turns*2
-    """
+    # GPTへ渡すプロンプトをより厳密に
     prompt = (
-        f"Write a natural, podcast-style conversation between Alice and Bob in {lang}.\n"
-        f"Topic: \"{topic}\". Exactly {turns - 1} exchanges (start with Bob, since Alice already started).\n\n"
-        "• Each line should sound like real spoken language, relaxed and friendly.\n"
-        "• Use informal expressions, small reactions, or light humor if appropriate.\n"
-        "• Output ONLY the conversation in this strict format:\n"
-        "  Alice: <text>\n"
-        "  Bob:   <text>\n"
-        "• Use ASCII colons (:) with no extra spacing or explanations.\n"
-        "• Avoid headings, summaries, or anything besides the dialogue.\n"
+        f"Write a conversation in {lang} between Alice and Bob.\n"
+        f"Topic: \"{topic}\". We already have Alice's first line.\n"
+        f"Now produce EXACTLY {turns - 1} more exchanges (so total {turns*2} lines),"
+        " starting with Bob.\n\n"
+        "Formatting rules:\n"
+        "1) Output ONLY the dialogue lines, nothing else.\n"
+        "2) Each line must begin with 'Alice:' or 'Bob:' (ASCII colon) with no extra spacing.\n"
+        "3) Do NOT use ellipses ('...') or bullet points.\n"
+        "4) Do NOT include headings, disclaimers, or any text beyond these lines.\n"
+        "5) Keep it casual and natural.\n"
+        "\nExample of correct format:\n"
+        "Alice: Hello!\n"
+        "Bob: Hey, how are you?\n"
+        "Alice: I'm good!\n"
+        "Bob: Glad to hear it.\n"
     )
 
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
+        temperature=0.4,  # やや下げて余計な創作を抑える
     )
 
+    # GPTの応答から "Alice:" / "Bob:" で始まる行だけを抜く
     raw_lines = [
         l.strip() for l in rsp.choices[0].message.content.splitlines()
         if l.strip().startswith(("Alice:", "Bob:"))
     ]
-    # ✅ Aliceの最初のセリフを追加（固定文）
-    first_line = f"Alice: Let's talk about {topic} today."
+
+    # GPTには「Aliceの最初のセリフは既にある」と伝えているので、
+    # ここで自分で intro を先頭に加える
     raw_lines = [intro] + raw_lines
 
     # ---- 必要数にトリミング / パディング --------------------------
-    max_lines = turns * 2                     # 期待行数
-    raw_lines = raw_lines[:max_lines]         # 余分をカット
+    max_lines = turns * 2  # 期待行数 (Alice->Bob × turns)
+    raw_lines = raw_lines[:max_lines]  # 余計な行が多いときは切る
 
-    while len(raw_lines) < max_lines:         # 足りなければ補完
-        speaker = "Alice" if len(raw_lines) % 2 == 0 else "Bob"
-        raw_lines.append(f"{speaker}: ...")
+    while len(raw_lines) < max_lines:  # 足りない行は穴埋め (最悪の場合)
+        speaker = "Alice" if (len(raw_lines) % 2 == 0) else "Bob"
+        # なるべく "..." は使わないよう空白や適当な短文にする
+        raw_lines.append(f"{speaker}: (no more lines)")
 
     # ---- 整形して返却 -------------------------------------------
-    return [(spk.strip(), txt.strip())
-            for spk, txt in (ln.split(":", 1) for ln in raw_lines)]
+    # 例えば "Alice: Hello" → ("Alice", "Hello")
+    return [
+        (spk.strip(), txt.strip())
+        for spk, txt in (ln.split(":", 1) for ln in raw_lines)
+    ]
