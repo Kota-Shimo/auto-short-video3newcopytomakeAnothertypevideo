@@ -56,11 +56,11 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
     raw_lines = [intro] + raw_lines
 
     # ---- 必要数にトリミング / パディング --------------------------
-max_lines = turns * 2
-raw_lines = raw_lines[:max_lines]
+    max_lines = turns * 2
+    raw_lines = raw_lines[:max_lines]
 
 # パディングはしない。足りない行はそのまま無視する。
 
 # 整形して返却
-return [(spk.strip(), txt.strip())
+    return [(spk.strip(), txt.strip())
         for spk, txt in (ln.split(":", 1) for ln in raw_lines)]
