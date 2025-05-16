@@ -64,10 +64,3 @@ raw_lines = raw_lines[:max_lines]
 # 整形して返却
 return [(spk.strip(), txt.strip())
         for spk, txt in (ln.split(":", 1) for ln in raw_lines)]
-
-    # ---- 整形して返却 -------------------------------------------
-    # 例えば "Alice: Hello" → ("Alice", "Hello")
-    return [
-        (spk.strip(), txt.strip())
-        for spk, txt in (ln.split(":", 1) for ln in raw_lines)
-    ]
