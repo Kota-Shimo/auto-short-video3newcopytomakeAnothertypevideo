@@ -56,13 +56,14 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
     raw_lines = [intro] + raw_lines
 
     # ---- 必要数にトリミング / パディング --------------------------
-    max_lines = turns * 2  # 期待行数 (Alice->Bob × turns)
-    raw_lines = raw_lines[:max_lines]  # 余計な行が多いときは切る
+max_lines = turns * 2
+raw_lines = raw_lines[:max_lines]
 
-    while len(raw_lines) < max_lines:  # 足りない行は穴埋め (最悪の場合)
-        speaker = "Alice" if (len(raw_lines) % 2 == 0) else "Bob"
-        # なるべく "..." は使わないよう空白や適当な短文にする
-        raw_lines.append(f"{speaker}: (no more lines)")
+# パディングはしない。足りない行はそのまま無視する。
+
+# 整形して返却
+return [(spk.strip(), txt.strip())
+        for spk, txt in (ln.split(":", 1) for ln in raw_lines)]
 
     # ---- 整形して返却 -------------------------------------------
     # 例えば "Alice: Hello" → ("Alice", "Hello")
