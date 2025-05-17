@@ -3,6 +3,10 @@ combos:
     subs:  [en, pt]
     account: acc1       # ← 1 本目用トークン
 
+  - audio: en
+    subs:  [en, ja]
+    account: acc3       # ← 3 本目用
+
   # combos.yaml ─ 追加分だけ抜粋
   - audio: ja          # 日本語音声
     subs:  [ja, en]    # 上段: 日本語　下段: 英語
