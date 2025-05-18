@@ -8,9 +8,9 @@ combos:
     account: acc3       # ← 3 本目用
 
   # combos.yaml ─ 追加分だけ抜粋
-  - audio: ja          # 日本語音声
-    subs:  [ja, en]    # 上段: 日本語　下段: 英語
-    account: acc4      # ← acc4 用トークン
+  #- audio: ja          # 日本語音声
+    #subs:  [ja, en]    # 上段: 日本語　下段: 英語
+    #account: acc4      # ← acc4 用トークン
 
   - audio: ja
     subs: [ja, ko]     # 上段: 日本語　下段: 韓国語
