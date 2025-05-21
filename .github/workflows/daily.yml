@@ -39,13 +39,17 @@ jobs:
       - name: 🔑 Restore YouTube tokens
         env:
           YT_ACC1: ${{ secrets.YT_TOKEN_ACC1 }}
+          YT_ACC2: ${{ secrets.YT_TOKEN_ACC2 }}   # ← 新しく追加
           YT_ACC3: ${{ secrets.YT_TOKEN_ACC3 }}   # ← 新しく追加
+          YT_ACC4: ${{ secrets.YT_TOKEN_ACC4 }}   # ← 新しく追加
           YT_ACC5: ${{ secrets.YT_TOKEN_ACC5 }}
           YT_ACC6: ${{ secrets.YT_TOKEN_ACC6 }}
         run: |
           mkdir -p tokens
           echo "$YT_ACC1" | base64 -d > tokens/token_acc1.pkl
+          echo "$YT_ACC2" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
           echo "$YT_ACC3" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
+          echo "$YT_ACC4" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
           echo "$YT_ACC5" | base64 -d > tokens/token_acc5.pkl
           echo "$YT_ACC6" | base64 -d > tokens/token_acc6.pkl
 
