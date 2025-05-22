@@ -47,9 +47,9 @@ jobs:
         run: |
           mkdir -p tokens
           echo "$YT_ACC1" | base64 -d > tokens/token_acc1.pkl
-          echo "$YT_ACC2" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
+          echo "$YT_ACC2" | base64 -d > tokens/token_acc2.pkl  # ← こちらも追加
           echo "$YT_ACC3" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
-          echo "$YT_ACC4" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
+          echo "$YT_ACC4" | base64 -d > tokens/token_acc4.pkl  # ← こちらも追加
           echo "$YT_ACC5" | base64 -d > tokens/token_acc5.pkl
           echo "$YT_ACC6" | base64 -d > tokens/token_acc6.pkl
 
