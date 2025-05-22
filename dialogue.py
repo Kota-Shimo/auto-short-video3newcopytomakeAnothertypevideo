@@ -30,7 +30,7 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
         f"Now produce EXACTLY {turns - 1} more exchanges (so total {turns*2} lines) "
         "starting with Bob.\n\n"
         "Formatting rules:\n"
-        "1) The entire conversation MUST be in {lang} only. Do not use English or any other language.\n"
+        "1) The entire conversation MUST be in {lang} only. Do not use any other language.\n"
         "2) Output ONLY the dialogue lines, no headings or explanations.\n"
         "3) Each line must begin with 'Alice:' or 'Bob:' (ASCII colon) with no extra spacing.\n"
         "4) Do NOT use ellipses ('...') or bullet points.\n"
