@@ -20,47 +20,50 @@ def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]
     else:  # default: English
         intro = f"Alice: Let's talk about {topic} today."
 
-    # GPTへ渡すプロンプトをより厳密に
+    # ❗ GPT へのプロンプトをより強力に「選択言語だけを使う」よう指示
+    #   例: 日本語にしたい場合は "the entire conversation must be in Japanese" と明示
     prompt = (
-        f"Write a conversation in {lang} between Alice and Bob.\n"
-        f"Topic: \"{topic}\". We already have Alice's first line.\n"
-        f"Now produce EXACTLY {turns - 1} more exchanges (so total {turns*2} lines),"
-        " starting with Bob.\n\n"
+        f"You are a professional {lang.upper()} speaker. "
+        f"Write a conversation EXCLUSIVELY in {lang} between Alice and Bob.\n\n"
+        f"Topic: \"{topic}\". We already have the first line from Alice:\n"
+        f"  {intro}\n"
+        f"Now produce EXACTLY {turns - 1} more exchanges (so total {turns*2} lines) "
+        "starting with Bob.\n\n"
         "Formatting rules:\n"
-        "1) Output ONLY the dialogue lines, nothing else.\n"
-        "2) Each line must begin with 'Alice:' or 'Bob:' (ASCII colon) with no extra spacing.\n"
-        "3) Do NOT use ellipses ('...') or bullet points.\n"
-        "4) Do NOT include headings, disclaimers, or any text beyond these lines.\n"
+        "1) The entire conversation MUST be in {lang} only. Do not use English or any other language.\n"
+        "2) Output ONLY the dialogue lines, no headings or explanations.\n"
+        "3) Each line must begin with 'Alice:' or 'Bob:' (ASCII colon) with no extra spacing.\n"
+        "4) Do NOT use ellipses ('...') or bullet points.\n"
         "5) Keep it casual and natural.\n"
         "\nExample of correct format:\n"
-        "Alice: Hello!\n"
-        "Bob: Hey, how are you?\n"
-        "Alice: I'm good!\n"
-        "Bob: Glad to hear it.\n"
+        "Alice: こんにちは、元気？\n"
+        "Bob: うん、大丈夫だよ。\n"
+        "Alice: じゃあ早速はじめようか。\n"
+        "Bob: そうしよう！\n"
     )
 
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.4,  # やや下げて余計な創作を抑える
+        temperature=0.3,  # さらに少し低めにして、言語逸脱を抑える
     )
 
-    # GPTの応答から "Alice:" / "Bob:" で始まる行だけを抜く
+    # GPTの応答から "Alice:" / "Bob:" で始まる行だけを抽出
     raw_lines = [
         l.strip() for l in rsp.choices[0].message.content.splitlines()
         if l.strip().startswith(("Alice:", "Bob:"))
     ]
 
-    # GPTには「Aliceの最初のセリフは既にある」と伝えているので、
-    # ここで自分で intro を先頭に加える
+    # 先頭に自前イントロを追加
     raw_lines = [intro] + raw_lines
 
-    # ---- 必要数にトリミング / パディング --------------------------
+    # 必要行数にトリミング
     max_lines = turns * 2
     raw_lines = raw_lines[:max_lines]
 
-# パディングはしない。足りない行はそのまま無視する。
-
-# 整形して返却
-    return [(spk.strip(), txt.strip())
-        for spk, txt in (ln.split(":", 1) for ln in raw_lines)]
+    # 整形して返却
+    # 例: "Alice: こんにちは" → ("Alice", "こんにちは")
+    return [
+        (spk.strip(), txt.strip())
+        for spk, txt in (ln.split(":", 1) for ln in raw_lines)
+    ]
