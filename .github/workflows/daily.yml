@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 480
+    timeout-minutes: 540
 
     steps:
       # ① リポジトリ取得
