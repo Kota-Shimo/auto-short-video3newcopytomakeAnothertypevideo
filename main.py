@@ -8,8 +8,8 @@ Usage:
   python main.py "トピック" [--turns 8] [--fsize-top 65] [--fsize-bot 60]
                    [--privacy unlisted] [--lines-only] [--no-upload]
                    [--chunk 60]
-                   [--jp-delay 0.6] [--jp-hold 1.8] [--jp-gap 0.15]
 """
+
 import argparse, logging, re, json, subprocess
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +45,7 @@ def sanitize_title(raw: str) -> str:
     return title[:97] + "…" if len(title) > 100 else title or "Auto Short"
 
 def _primary_lang(audio_lang: str, subs: list[str]) -> str:
+    """複数字幕がある場合に「メイン表示言語」を決める"""
     return subs[1] if len(subs) > 1 else audio_lang
 
 def make_title(topic, audio_lang, subs):
@@ -103,8 +104,13 @@ def make_tags(topic, audio_lang, subs):
             tags.extend([f"{LANG_NAME[code]} subtitles", f"Learn {LANG_NAME[code]}"])
     return list(dict.fromkeys(tags))[:15]
 
-def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size,
-            jp_delay, jp_hold, jp_gap):
+def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size):
+    """
+    combos.yaml の全エントリをループし、
+    1) lines.json & full.mp3 生成
+    2) chunk_builder.py で動画化
+    3) upload_youtube.py でアップロード
+    """
     for combo in COMBOS:
         audio_lang = combo["audio"]
         subs       = combo["subs"]
@@ -117,15 +123,17 @@ def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size,
                 yt_privacy=privacy,
                 account=account,
                 do_upload=do_upload,
-                chunk_size=chunk_size,
-                jp_delay=jp_delay,
-                jp_hold=jp_hold,
-                jp_gap=jp_gap)
+                chunk_size=chunk_size)
 
 def run_one(topic, turns, audio_lang, subs,
             fsize_top, fsize_bot,
             yt_privacy, account, do_upload,
-            chunk_size, jp_delay, jp_hold, jp_gap):
+            chunk_size):
+    """
+    1) GPTスクリプト + TTS で lines.json, full.mp3 を生成
+    2) chunk_builder.py で チャンク動画作成
+    3) upload_youtube.py でアップロード
+    """
     reset_temp()
 
     # --- (A) 台本作り & 音声合成 ---
@@ -140,15 +148,18 @@ def run_one(topic, turns, audio_lang, subs,
         mp_parts.append(mp)
         durations.append(AudioSegment.from_file(mp).duration_seconds)
 
+        # 翻訳 or 同一言語
         for r, lang in enumerate(subs):
             sub_rows[r].append(line if lang == audio_lang else translate(line, lang))
 
     concat_mp3(mp_parts, TEMP / "full_raw.mp3")
     enhance(TEMP / "full_raw.mp3", TEMP / "full.mp3")
 
+    # 背景画像
     bg_png = TEMP / "bg.png"
     fetch_bg(topic, bg_png)
 
+    # lines.json 出力用
     valid_dialogue = [d for d in dialogue if d[1].strip() not in ("...", "")]
     lines_data = []
     for i, ((spk, txt), dur) in enumerate(zip(valid_dialogue, durations)):
@@ -162,13 +173,16 @@ def run_one(topic, turns, audio_lang, subs,
         json.dumps(lines_data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    # --lines-only ならここで終了
     if args.lines_only:
         return
 
+    # --- (B) サムネ（動画に直接は使わないがupload時に使うかも）
     primary_lang = _primary_lang(audio_lang, subs)
     thumb = TEMP / "thumbnail.jpg"
     make_thumbnail(topic, primary_lang, thumb)
 
+    # --- (C) chunk_builder.py で mp4 作成 ---
     stamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
     final_mp4  = OUTPUT / f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
     final_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -178,11 +192,9 @@ def run_one(topic, turns, audio_lang, subs,
         str(TEMP / "lines.json"), str(TEMP / "full.mp3"), str(bg_png),
         "--chunk", str(chunk_size),
         "--rows", str(len(subs)),
-        "--out", str(final_mp4),
-        "--jp-delay", str(jp_delay),
-        "--jp-hold", str(jp_hold),
-        "--jp-gap", str(jp_gap)
+        "--out", str(final_mp4)
     ]
+    # fsize_top, fsize_bot を渡したい場合:
     if fsize_top is not None:
         cmd += ["--fsize-top", str(fsize_top)]
     if fsize_bot is not None:
@@ -195,6 +207,7 @@ def run_one(topic, turns, audio_lang, subs,
         print("⏭  --no-upload 指定のためアップロードしません。")
         return
 
+    # --- (D) upload_youtube.py でアップロード ---
     title = make_title(topic, audio_lang, subs)
     desc  = make_desc(topic, audio_lang, subs)
     tags  = make_tags(topic, audio_lang, subs)
@@ -218,20 +231,11 @@ if __name__ == "__main__":
     ap.add_argument("--fsize-bot", type=int, default=60, help="下段字幕フォントサイズ")
     ap.add_argument("--privacy", default="unlisted", choices=["public", "unlisted", "private"])
     ap.add_argument("--lines-only", action="store_true",
-                    help="音声と lines.json だけ出力し、後続処理は行わない")
+                    help="音声と lines.json だけ出力し、後続処理（動画生成・アップロード）は行わない")
     ap.add_argument("--no-upload", action="store_true",
                     help="動画生成までは行うが、YouTube へはアップロードしない")
     ap.add_argument("--chunk", type=int, default=60,
                     help="chunk_builder.py で1チャンク何行に分割するか")
-
-    # ★追加：下段字幕制御オプション
-    ap.add_argument("--jp-delay", type=float, default=0.6,
-                    help="下段字幕を何秒遅らせるか")
-    ap.add_argument("--jp-hold",  type=float, default=1.8,
-                    help="下段字幕の最大表示秒数")
-    ap.add_argument("--jp-gap",   type=float, default=0.15,
-                    help="次セリフ直前の隙間秒")
-
     args = ap.parse_args()
 
     run_all(
@@ -241,8 +245,5 @@ if __name__ == "__main__":
         fsize_bot   = args.fsize_bot,
         privacy     = args.privacy,
         do_upload   =(not args.no_upload),
-        chunk_size  = args.chunk,
-        jp_delay    = args.jp_delay,
-        jp_hold     = args.jp_hold,
-        jp_gap      = args.jp_gap
+        chunk_size  = args.chunk
     )
