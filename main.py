@@ -31,7 +31,7 @@ from upload_youtube import upload
 
 GPT = OpenAI()
 
-# combos.yaml 読み込み (各エントリ: audio, subs, account)
+# combos.yaml 読み込み (各エントリ: audio, subs, account, title_lang)
 with open(BASE / "combos.yaml", encoding="utf-8") as f:
     COMBOS = yaml.safe_load(f)["combos"]
 
@@ -63,28 +63,39 @@ def score_title(t: str) -> int:
         score += 10
     return score
 
-def make_title(topic, audio_lang, subs):
-    prompt = (
-        "You are a YouTube copywriter.\n"
-        "Generate 5 concise Japanese titles (each ≤28 JP chars) for a LANGUAGE-LEARNING video.\n"
-        "Each title must start with a strong scenario keyword and include a concrete benefit.\n"
-        f"Scenario/topic: {topic}\n"
-        "Return as 5 lines, one per title, no bullets."
-    )
+def make_title(topic, title_lang: str):
+    if title_lang == "ja":
+        prompt = (
+            "You are a YouTube copywriter.\n"
+            "Generate 5 concise Japanese titles (each ≤28 JP chars) for a LANGUAGE-LEARNING video.\n"
+            "Each title must start with a strong scenario keyword and include a concrete benefit.\n"
+            f"Scenario/topic: {topic}\n"
+            "Return as 5 lines, one per title, no bullets."
+        )
+    else:
+        prompt = (
+            f"You are a YouTube copywriter.\n"
+            f"Generate 5 concise {LANG_NAME.get(title_lang, 'English')} titles (each ≤55 chars) for a LANGUAGE-LEARNING video.\n"
+            "Each title must start with a strong scenario keyword and include a concrete benefit.\n"
+            f"Scenario/topic: {topic}\n"
+            "Return as 5 lines, one per title, no bullets."
+        )
+
     rsp = GPT.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
     )
     cands = [sanitize_title(x) for x in rsp.choices[0].message.content.split("\n") if x.strip()]
-    cands = [t if any(t.startswith(k) for k in TOP_KEYWORDS) else f"{topic} {t}" for t in cands]
-    best = sorted(cands, key=score_title, reverse=True)[0]
-    return best[:28]
+    # 日本語タイトルだけ TOP_KEYWORDS チェック適用
+    if title_lang == "ja":
+        cands = [t if any(t.startswith(k) for k in TOP_KEYWORDS) else f"{topic} {t}" for t in cands]
+    best = sorted(cands, key=score_title if title_lang == "ja" else len, reverse=True)[0]
+    return best[:28] if title_lang == "ja" else best[:55]
 
-def make_desc(topic, audio_lang, subs):
-    primary = _primary_lang(audio_lang, subs)
+def make_desc(topic, title_lang: str):
     prompt_desc = (
-        f"Write one sentence (≤90 characters) in {primary.upper()} summarising "
+        f"Write one sentence (≤90 characters) in {LANG_NAME.get(title_lang,'English')} summarising "
         f'\"{topic}\" and ending with a short call-to-action.'
     )
     rsp = GPT.chat.completions.create(
@@ -95,7 +106,7 @@ def make_desc(topic, audio_lang, subs):
     base = rsp.choices[0].message.content.strip()
 
     prompt_tags = (
-        f"List 2 or 3 popular hashtags in {primary.upper()} used by language learners studying {primary.upper()}. "
+        f"List 2 or 3 popular hashtags in {LANG_NAME.get(title_lang,'English')} used by language learners studying {LANG_NAME.get(title_lang,'English')}. "
         "Respond ONLY with the hashtags, separated by spaces."
     )
     tag_rsp = GPT.chat.completions.create(
@@ -153,20 +164,22 @@ def make_chapters_by_duration(durations, target_sections=4):
 
 def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size):
     for combo in COMBOS:
-        audio_lang = combo["audio"]
-        subs       = combo["subs"]
-        account    = combo.get("account", "default")
+        audio_lang  = combo["audio"]
+        subs        = combo["subs"]
+        account     = combo.get("account", "default")
+        title_lang  = combo.get("title_lang", audio_lang)  # ★ 追加
 
-        logging.info(f"=== Combo: {audio_lang}, subs={subs}, account={account} ===")
+        logging.info(f"=== Combo: {audio_lang}, subs={subs}, account={account}, title_lang={title_lang} ===")
         run_one(topic, turns,
                 audio_lang, subs,
+                title_lang,
                 fsize_top, fsize_bot,
                 yt_privacy=privacy,
                 account=account,
                 do_upload=do_upload,
                 chunk_size=chunk_size)
 
-def run_one(topic, turns, audio_lang, subs,
+def run_one(topic, turns, audio_lang, subs, title_lang,
             fsize_top, fsize_bot,
             yt_privacy, account, do_upload,
             chunk_size):
@@ -208,9 +221,8 @@ def run_one(topic, turns, audio_lang, subs,
     if args.lines_only:
         return
 
-    primary_lang = _primary_lang(audio_lang, subs)
     thumb = TEMP / "thumbnail.jpg"
-    make_thumbnail(topic, primary_lang, thumb)
+    make_thumbnail(topic, title_lang, thumb)
 
     stamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
     final_mp4  = OUTPUT / f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
@@ -235,8 +247,8 @@ def run_one(topic, turns, audio_lang, subs,
         logging.info("⏭  --no-upload 指定のためアップロードしません。")
         return
 
-    title = make_title(topic, audio_lang, subs)
-    desc_base = make_desc(topic, audio_lang, subs)
+    title = make_title(topic, title_lang)
+    desc_base = make_desc(topic, title_lang)
     chapters_text = make_chapters_by_duration(durations, target_sections=4)
     desc = (chapters_text + "\n\n" + desc_base) if chapters_text else desc_base
 
@@ -250,7 +262,7 @@ def run_one(topic, turns, audio_lang, subs,
         privacy      = yt_privacy,
         account      = account,
         thumbnail    = thumb,
-        default_lang = audio_lang  # ★ 言語設定を追加
+        default_lang = audio_lang
     )
 
 if __name__ == "__main__":
