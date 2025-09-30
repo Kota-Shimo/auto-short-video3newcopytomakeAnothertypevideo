@@ -1,30 +1,24 @@
 combos:
   - audio: en
-    subs:  [en, pt]
+    subs: [en, pt]
     account: acc1
-    title_lang: en     # タイトルとタグは英語
 
   - audio: en
-    subs:  [en, id]
+    subs: [en, id]
     account: acc2
-    title_lang: en     # 英語チャンネル
 
   - audio: en
-    subs:  [en, ja]
+    subs: [en, ja]
     account: acc3
-    title_lang: ja     # 日本語チャンネルに合わせて日本語タイトル
 
   - audio: ja
-    subs:  [ja, en]
+    subs: [ja, en]
     account: acc4
-    title_lang: ja     # 日本語チャンネル（日本語タイトル）
 
   - audio: ja
     subs: [ja, ko]
     account: acc5
-    title_lang: ja     # 日本語チャンネル
 
   - audio: ja
     subs: [ja, id]
     account: acc6
-    title_lang: ja     # 日本語チャンネル
