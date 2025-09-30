@@ -6,7 +6,6 @@
 usage:
   python chunk_builder.py temp/lines.json temp/full.mp3 temp/bg.png \
         --chunk 60 --rows 2 --fsize-top 65 --fsize-bot 60 \
-        --jp-delay 0.6 --jp-hold 1.8 --jp-gap 0.15 \
         --out output/final_long.mp4
 """
 import argparse
@@ -29,15 +28,6 @@ ap.add_argument("--chunk",     type=int, default=40, help="1 チャンクあた�
 ap.add_argument("--rows",      type=int, default=2,  help="字幕段数 (上段=音声言語, 下段=翻訳など)")
 ap.add_argument("--fsize-top", type=int, default=None, help="上段字幕フォントサイズ")
 ap.add_argument("--fsize-bot", type=int, default=None, help="下段字幕フォントサイズ")
-
-# ★追加：下段字幕制御オプション
-ap.add_argument("--jp-delay", type=float, default=0.6,
-                help="下段字幕を何秒遅らせるか")
-ap.add_argument("--jp-hold",  type=float, default=1.8,
-                help="下段字幕の最大表示秒数")
-ap.add_argument("--jp-gap",   type=float, default=0.15,
-                help="次セリフ直前の隙間秒")
-
 args = ap.parse_args()
 
 SCRIPT     = Path(args.lines_json)
@@ -93,17 +83,12 @@ for idx, chunk in enumerate(parts):
     print(f"▶️ part {idx+1}/{len(parts)} | 行数={len(chunk)}"
           f" | start={t_start:.1f}s len={t_len:.1f}s")
 
-    # 可変オプションをまとめる
+    # フォントサイズを可変にしたい場合: argparse で受け取ってオプション連想配列にまとめる
     extra_args = {}
     if args.fsize_top:
         extra_args["fsize_top"] = args.fsize_top
     if args.fsize_bot:
         extra_args["fsize_bot"] = args.fsize_bot
-
-    # ★追加：下段字幕制御を渡す
-    extra_args["jp_delay"] = args.jp_delay
-    extra_args["jp_hold"]  = args.jp_hold
-    extra_args["jp_gap"]   = args.jp_gap
 
     # 字幕つき動画を生成
     build_video(
@@ -112,7 +97,7 @@ for idx, chunk in enumerate(parts):
         voice_mp3=audio_part,
         out_mp4=mp4_part,
         rows=ROWS,
-        **extra_args
+        **extra_args  # fsize_top, fsize_bot を渡す
     )
 
     part_files.append(mp4_part)
