@@ -3,7 +3,6 @@ from moviepy import (
     ImageClip, TextClip, AudioFileClip, ColorClip, concatenate_videoclips
 )
 from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy.video.fx.all import fadein, fadeout
 import os, unicodedata as ud, re, textwrap
 from pathlib import Path
 
@@ -19,7 +18,7 @@ def xpos(w: int) -> int:
     return (SCREEN_W - w) // 2 + SHIFT_X
 
 # ---------- CJK 折り返し ----------
-def wrap_cjk(text: str, width: int = 18) -> str:   # ← 16 → 18 に変更
+def wrap_cjk(text: str, width: int = 16) -> str:
     if re.search(r"[\u3040-\u30ff\u4e00-\u9fff]", text):
         return "\n".join(textwrap.wrap(text, width, break_long_words=True))
     return text
@@ -51,8 +50,7 @@ PAD_X, PAD_Y       = 22, 16
 
 # ---------- 半透明黒帯 ----------
 def _bg(txt: TextClip) -> ColorClip:
-    # 不透明度 0.55 → 0.45 に調整
-    return ColorClip((txt.w + PAD_X * 2, txt.h + PAD_Y * 2), (0, 0, 0)).with_opacity(0.45)
+    return ColorClip((txt.w + PAD_X * 2, txt.h + PAD_Y * 2), (0, 0, 0)).with_opacity(0.55)
 
 # ---------- メインビルド関数 ----------
 def build_video(
@@ -82,8 +80,8 @@ def build_video(
             font_size=fsize_top,
             color="white", stroke_color="black", stroke_width=8,
             method="caption", size=(TEXT_W, None),
-        ).fx(fadein, 0.08).fx(fadeout, 0.08)   # フェード追加
-        top_bg   = _bg(top_clip).fx(fadein, 0.08).fx(fadeout, 0.08)
+        )
+        top_bg   = _bg(top_clip)
 
         elem = [
             top_bg  .with_position((xpos(top_bg.w),  POS_Y - PAD_Y)),
@@ -100,8 +98,8 @@ def build_video(
                 font_size=fsize_bot,
                 color="white", stroke_color="black", stroke_width=4,
                 method="caption", size=(TEXT_W, None),
-            ).fx(fadein, 0.08).fx(fadeout, 0.08)
-            bot_bg = _bg(bot_clip).fx(fadein, 0.08).fx(fadeout, 0.08)
+            )
+            bot_bg = _bg(bot_clip)
             y_bot  = POS_Y + top_bg.h + LINE_GAP
             elem += [
                 bot_bg  .with_position((xpos(bot_bg.w),  y_bot - PAD_Y)),
@@ -120,12 +118,12 @@ def build_video(
 
     video = concatenate_videoclips(clips, method="compose").with_audio(AudioFileClip(voice_mp3))
     video.write_videofile(
-        str(out_mp4),
-        fps=30,
-        codec="libx264",
-        audio_codec="aac",
-        temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
-        remove_temp=True
+    str(out_mp4),
+    fps=30,
+    codec="libx264",
+    audio_codec="aac",
+    temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
+    remove_temp=True
     )
 
 # =====================================================
