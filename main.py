@@ -44,11 +44,7 @@ def sanitize_title(raw: str) -> str:
     title = re.sub(r"[\s\u3000]+", " ", raw).strip()
     return title[:97] + "…" if len(title) > 100 else title or "Auto Video"
 
-def _primary_lang(audio_lang: str, subs: list[str]) -> str:
-    """複数字幕がある場合に「メイン表示言語」を決める（互換用）"""
-    return subs[1] if len(subs) > 1 else audio_lang
-
-# ───────── タイトル最適化（複数案→自動スコアで採用） ─────────
+# ───────── タイトル最適化 ─────────
 TOP_KEYWORDS = ["ホテル英語", "空港英会話", "レストラン英語", "仕事で使う英語", "旅行英会話", "接客英語"]
 
 def score_title(t: str) -> int:
@@ -87,13 +83,13 @@ def make_title(topic, title_lang: str):
         temperature=0.7,
     )
     cands = [sanitize_title(x) for x in rsp.choices[0].message.content.split("\n") if x.strip()]
-    # 日本語タイトルだけ TOP_KEYWORDS チェック適用
+
     if title_lang == "ja":
         cands = [t if any(t.startswith(k) for k in TOP_KEYWORDS) else f"{topic} {t}" for t in cands]
         best = sorted(cands, key=score_title, reverse=True)[0]
         return best[:28]
     else:
-        best = max(cands, key=len)  # 55字上限で情報量が多いものを簡易採用
+        best = max(cands, key=len)
         return best[:55]
 
 def make_desc(topic, title_lang: str):
@@ -129,19 +125,16 @@ LANG_NAME = {
     "es": "Spanish",
 }
 
-# ───────── タグの長尺最適化 ─────────
-def make_tags(topic, audio_lang, subs):
+# ───────── タグ生成 ─────────
+def make_tags(topic, audio_lang, subs, title_lang):
     tags = [
         topic,
         "language learning",
-        "英会話",
-        "旅行英会話",
-        f"{LANG_NAME.get(audio_lang,'')} speaking",
-        "ホテル 英語",
-        "空港 英会話",
-        "接客英語",
-        "仕事で使う英語",
+        f"{LANG_NAME.get(title_lang,'English')} study",
+        f"{LANG_NAME.get(title_lang,'English')} practice",
     ]
+    if title_lang == "ja":
+        tags.extend(["英会話", "旅行英会話", "接客英語", "仕事で使う英語"])
     for code in subs[1:]:
         if code in LANG_NAME:
             tags.extend([f"{LANG_NAME[code]} subtitles", f"Learn {LANG_NAME[code]}"])
@@ -170,7 +163,6 @@ def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size):
         audio_lang  = combo["audio"]
         subs        = combo["subs"]
         account     = combo.get("account", "default")
-        # ★ title_lang を combos から読み取り。なければ subs[1] → audio_lang にフォールバック
         title_lang  = combo.get("title_lang", subs[1] if len(subs) > 1 else audio_lang)
 
         logging.info(f"=== Combo: {audio_lang}, subs={subs}, account={account}, title_lang={title_lang} ===")
@@ -188,10 +180,9 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
             chunk_size):
     reset_temp()
 
-    # ★ 台本用トピックは音声言語に合わせて翻訳（英語音声で日本語が混ざるのを防ぐ）
+    # 台本用トピックは音声言語に翻訳（英語音声で日本語トピックが混ざるのを防ぐ）
     topic_for_dialogue = translate(topic, audio_lang) if audio_lang != "ja" else topic
 
-    # --- (A) 台本作り & 音声合成 ---
     dialogue = make_dialogue(topic_for_dialogue, audio_lang, turns)
     mp_parts, durations, sub_rows = [], [], [[] for _ in subs]
 
@@ -203,18 +194,15 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
         mp_parts.append(mp)
         durations.append(AudioSegment.from_file(mp).duration_seconds)
 
-        # 翻訳 or 同一言語
         for r, lang in enumerate(subs):
             sub_rows[r].append(line if lang == audio_lang else translate(line, lang))
 
     concat_mp3(mp_parts, TEMP / "full_raw.mp3")
     enhance(TEMP / "full_raw.mp3", TEMP / "full.mp3")
 
-    # 背景画像
     bg_png = TEMP / "bg.png"
     fetch_bg(topic, bg_png)
 
-    # lines.json 出力用
     valid_dialogue = [d for d in dialogue if d[1].strip() not in ("...", "")]
     lines_data = []
     for i, ((spk, txt), dur) in enumerate(zip(valid_dialogue, durations)):
@@ -228,16 +216,14 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
         json.dumps(lines_data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    # --lines-only ならここで終了
     if args.lines_only:
         return
 
-    # --- (B) サムネ（常に字幕の第2言語を優先）
+    # サムネイルは常に第二字幕言語優先
     thumb = TEMP / "thumbnail.jpg"
     thumb_lang = subs[1] if len(subs) > 1 else audio_lang
     make_thumbnail(topic, thumb_lang, thumb)
 
-    # --- (C) chunk_builder.py で mp4 作成 ---
     stamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
     final_mp4  = OUTPUT / f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
     final_mp4.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +235,6 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
         "--rows", str(len(subs)),
         "--out", str(final_mp4)
     ]
-    # fsize_top, fsize_bot を渡す
     if fsize_top is not None:
         cmd += ["--fsize-top", str(fsize_top)]
     if fsize_bot is not None:
@@ -262,16 +247,13 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
         logging.info("⏭  --no-upload 指定のためアップロードしません。")
         return
 
-    # --- (D) タイトル/説明は combos の title_lang に合わせる ---
     title = make_title(topic, title_lang)
     desc_base = make_desc(topic, title_lang)
     chapters_text = make_chapters_by_duration(durations, target_sections=4)
     desc = (chapters_text + "\n\n" + desc_base) if chapters_text else desc_base
 
-    # タグ（長尺最適化・現状のまま）
-    tags  = make_tags(topic, audio_lang, subs)
+    tags  = make_tags(topic, audio_lang, subs, title_lang)
 
-    # --- (E) アップロード（動画言語は音声言語に設定）
     upload(
         video_path   = final_mp4,
         title        = title,
