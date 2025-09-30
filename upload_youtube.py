@@ -7,7 +7,7 @@ YouTube へ動画をアップロードするユーティリティ。
 from pathlib import Path
 from typing import List, Optional
 import pickle, re, logging
-import time  # ★ 待機のため追加
+import time  # 待機のため追加
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -71,7 +71,8 @@ def upload(
     tags: Optional[List[str]] = None,
     privacy: str = "public",
     account: str = "default",
-    thumbnail: Path | None = None,  # ★ カスタムサムネ
+    thumbnail: Path | None = None,  # カスタムサムネ
+    default_lang: str = "en",       # ★ 動画言語
 ):
     """
     video_path : Path to .mp4
@@ -81,6 +82,7 @@ def upload(
     privacy    : "public" / "unlisted" / "private"
     account    : token ラベル（複数アカウント切替用）
     thumbnail  : Path to .jpg / .png（カスタムサムネ）※任意
+    default_lang: ISO 639-1 言語コード (例: "en", "ja")
     """
     service = _get_service(account)
 
@@ -94,10 +96,13 @@ def upload(
             "title":       title,
             "description": desc,
             "tags":        tags or [],
-            "categoryId":  "27",  # 27 = Education
+            "categoryId":  "27",  # Education
+            "defaultLanguage": default_lang,   # ★ 動画言語
         },
         "status": {
             "privacyStatus": privacy,
+            "license": "youtube",       # 標準ライセンス
+            "selfDeclaredMadeForKids": False,  # 年齢制限なし
         },
     }
 
@@ -115,13 +120,11 @@ def upload(
 
     # ---- カスタムサムネイル (待ち時間 + try/except) ----
     if thumbnail and thumbnail.exists():
-        # 動画アップ後すぐは処理が不安定な場合も。10秒程度待機。
-        time.sleep(10)
+        time.sleep(10)  # 動画登録直後は反映不安定なので待つ
         try:
             _set_thumbnail(service, video_id, thumbnail)
             print("🖼  Custom thumbnail set.")
         except HttpError as e:
-            # 403 などが出ても致命エラーにはせず、ログに留める。
             print(f"⚠️  Thumbnail set failed: {e}")
 
     logging.info("YouTube URL: %s (account=%s)", url, account)
