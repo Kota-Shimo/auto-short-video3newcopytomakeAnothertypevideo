@@ -48,20 +48,45 @@ def _primary_lang(audio_lang: str, subs: list[str]) -> str:
     """複数字幕がある場合に「メイン表示言語」を決める"""
     return subs[1] if len(subs) > 1 else audio_lang
 
+# ───────── タイトル最適化（複数案→自動スコアで採用） ─────────
+TOP_KEYWORDS = ["ホテル英語", "空港英会話", "レストラン英語", "仕事で使う英語", "旅行英会話", "接客英語"]
+
+def score_title(t: str) -> int:
+    t = t.strip()
+    score = 0
+    # 先頭に強キーワード
+    if any(t.startswith(k) for k in TOP_KEYWORDS):
+        score += 20
+    # 具体語（数字/動作/場所/用途）
+    if re.search(r"\d+|チェックイン|注文|予約|問い合わせ|例文|空港|ホテル|レストラン|面接|受付", t):
+        score += 15
+    # 長さ最適（～28全角目安）
+    score += max(0, 15 - max(0, len(t) - 28))
+    # 言語明示
+    if re.search(r"(英語|English)", t):
+        score += 10
+    return score
+
 def make_title(topic, audio_lang, subs):
     primary = _primary_lang(audio_lang, subs)
     prompt = (
-        "You are a YouTube video copywriter.\n"
-        "Write a clear and engaging title (≤55 ASCII or 28 JP characters).\n"
-        f"Main part in {primary.upper()}, then ' | ' and an English gloss.\n"
-        f"Topic: {topic}"
+        "You are a YouTube copywriter.\n"
+        "Generate 5 concise Japanese titles (each ≤28 JP chars) for a LANGUAGE-LEARNING video.\n"
+        "Each title must start with a strong scenario keyword and include a concrete benefit.\n"
+        f"Scenario/topic: {topic}\n"
+        "Return as 5 lines, one per title, no bullets."
     )
+    rsp = GPT.chat(completions={"model":"gpt-4o-mini"})  # dummy call to satisfy IDEs
     rsp = GPT.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
     )
-    return sanitize_title(rsp.choices[0].message.content.strip())
+    cands = [sanitize_title(x) for x in rsp.choices[0].message.content.split("\n") if x.strip()]
+    # 先頭キーワードがない候補は topic を頭に補強
+    cands = [t if any(t.startswith(k) for k in TOP_KEYWORDS) else f"{topic} {t}" for t in cands]
+    best = sorted(cands, key=score_title, reverse=True)[0]
+    return best[:28]
 
 def make_desc(topic, audio_lang, subs):
     primary = _primary_lang(audio_lang, subs)
@@ -96,13 +121,42 @@ LANG_NAME = {
     "ko": "Korean",
     "es": "Spanish",
 }
+
+# ───────── タグの長尺最適化（Shorts除去＋検索意図タグ） ─────────
 def make_tags(topic, audio_lang, subs):
-    tags = [topic, "language learning", "Shorts",
-            f"{LANG_NAME.get(audio_lang,'')} speaking"]
+    tags = [
+        topic,
+        "language learning",
+        "英会話",
+        "旅行英会話",
+        f"{LANG_NAME.get(audio_lang,'')} speaking",
+        "ホテル 英語",
+        "空港 英会話",
+        "接客英語",
+        "仕事で使う英語",
+    ]
     for code in subs[1:]:
         if code in LANG_NAME:
             tags.extend([f"{LANG_NAME[code]} subtitles", f"Learn {LANG_NAME[code]}"])
     return list(dict.fromkeys(tags))[:15]
+
+# ───────── 説明欄に章分け（タイムスタンプ） ─────────
+def _mmss(sec: float) -> str:
+    m, s = divmod(int(sec), 60)
+    return f"{m:02}:{s:02}"
+
+def make_chapters_by_duration(durations, target_sections=4):
+    total = float(sum(durations)) if durations else 0.0
+    if total <= 0:
+        return ""
+    step  = max(60.0, total / max(1, target_sections))  # 1分未満の細切れ防止
+    out   = [f"{_mmss(0)} Intro"]
+    t = 0.0
+    while t + step < total:
+        t += step
+        out.append(f"{_mmss(t)} Section")
+    out.append(f"{_mmss(total)} Outro")
+    return "\n".join(out)
 
 def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size):
     """
@@ -208,8 +262,15 @@ def run_one(topic, turns, audio_lang, subs,
         return
 
     # --- (D) upload_youtube.py でアップロード ---
+    # タイトル（5案→自動スコア採用）
     title = make_title(topic, audio_lang, subs)
-    desc  = make_desc(topic, audio_lang, subs)
+
+    # 説明文（先頭に章分けを自動挿入）
+    desc_base = make_desc(topic, audio_lang, subs)
+    chapters_text = make_chapters_by_duration(durations, target_sections=4)
+    desc = (chapters_text + "\n\n" + desc_base) if chapters_text else desc_base
+
+    # タグ（長尺最適化）
     tags  = make_tags(topic, audio_lang, subs)
 
     upload(
