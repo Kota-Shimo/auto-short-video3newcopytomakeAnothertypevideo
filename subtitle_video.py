@@ -61,27 +61,18 @@ def build_video(
     rows: int = 2,
     fsize_top: int = DEFAULT_FSIZE_TOP,
     fsize_bot: int = DEFAULT_FSIZE_BOT,
-    jp_delay: float = 0.6,   # ★追加：L2を遅らせる秒数
-    jp_hold: float = 1.8,    # ★追加：L2の最大表示秒数
-    jp_gap: float = 0.15,    # ★追加：次セリフ直前の安全隙間
 ):
     """
     lines : [(speaker, row1_text, row2_text, duration_sec), ...]
     rows  : 1 = 上段のみ / 2 = 上段+下段
-    fsize_top / fsize_bot : 字幕フォントサイズ
-    jp_delay : 下段を何秒遅らせるか
-    jp_hold  : 下段を最大何秒表示するか
-    jp_gap   : 次のセリフ直前に確保する隙間
+    fsize_top / fsize_bot : 字幕フォントサイズを外部から可変指定
     """
     bg_base = ImageClip(bg_path).resized((SCREEN_W, SCREEN_H))
     clips = []
 
-    n = len(lines)
-    for idx, (speaker, *row_texts, dur) in enumerate(lines):
-        dur = float(dur)
-
+    for speaker, *row_texts, dur in lines:
         # ----- 上段 -----
-        top_body = wrap_cjk(row_texts[0]) if row_texts and row_texts[0] else ""
+        top_body = wrap_cjk(row_texts[0])
         top_txt  = f"{speaker}: {top_body}"
         top_clip = TextClip(
             text=top_txt,
@@ -98,8 +89,8 @@ def build_video(
         ]
         block_h = top_bg.h
 
-        # ----- 下段（二次言語） -----
-        if rows >= 2 and len(row_texts) > 1 and row_texts[1]:
+        # ----- 下段 -----
+        if rows >= 2:
             bot_body = wrap_cjk(row_texts[1]) + "\n "
             bot_clip = TextClip(
                 text=bot_body,
@@ -110,23 +101,11 @@ def build_video(
             )
             bot_bg = _bg(bot_clip)
             y_bot  = POS_Y + top_bg.h + LINE_GAP
-
-            # 次のセリフ開始時刻（不明なら∞）
-            next_start = float(lines[idx+1][-1]) if idx+1 < n else float("inf")
-
-            # 遅延＆短縮
-            bs = max(0.0, min(jp_delay, dur - 0.05))
-            be = min(dur - jp_gap, bs + jp_hold, next_start - jp_gap)
-
-            # 短すぎる場合は非表示
-            if be - bs >= 0.3:
-                bot_bg   = bot_bg  .with_start(bs).with_duration(be - bs)
-                bot_clip = bot_clip.with_start(bs).with_duration(be - bs)
-                elem += [
-                    bot_bg  .with_position((xpos(bot_bg.w),  y_bot - PAD_Y)),
-                    bot_clip.with_position((xpos(bot_clip.w), y_bot)),
-                ]
-                block_h += LINE_GAP + bot_bg.h
+            elem += [
+                bot_bg  .with_position((xpos(bot_bg.w),  y_bot - PAD_Y)),
+                bot_clip.with_position((xpos(bot_clip.w), y_bot)),
+            ]
+            block_h += LINE_GAP + bot_bg.h
 
         # ----- はみ出し補正 -----
         overflow = POS_Y + block_h + BOTTOM_MARGIN - SCREEN_H
@@ -139,12 +118,12 @@ def build_video(
 
     video = concatenate_videoclips(clips, method="compose").with_audio(AudioFileClip(voice_mp3))
     video.write_videofile(
-        str(out_mp4),
-        fps=30,
-        codec="libx264",
-        audio_codec="aac",
-        temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
-        remove_temp=True
+    str(out_mp4),
+    fps=30,
+    codec="libx264",
+    audio_codec="aac",
+    temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
+    remove_temp=True
     )
 
 # =====================================================
