@@ -1,26 +1,30 @@
 combos:
   - audio: en
     subs:  [en, pt]
-    account: acc1       # ← 1 本目用トークン
-    
+    account: acc1
+    title_lang: en     # タイトルとタグは英語
+
   - audio: en
     subs:  [en, id]
-    account: acc2       # ← 2 本目用    
+    account: acc2
+    title_lang: en     # 英語チャンネル
 
   - audio: en
     subs:  [en, ja]
-    account: acc3       # ← 3 本目用
-
-  # combos.yaml ─ 追加分だけ抜粋
-  - audio: ja          # 日本語音声
-    subs:  [ja, en]    # 上段: 日本語　下段: 英語
-    account: acc4      # ← acc4 用トークン
+    account: acc3
+    title_lang: ja     # 日本語チャンネルに合わせて日本語タイトル
 
   - audio: ja
-    subs: [ja, ko]     # 上段: 日本語　下段: 韓国語
+    subs:  [ja, en]
+    account: acc4
+    title_lang: ja     # 日本語チャンネル（日本語タイトル）
+
+  - audio: ja
+    subs: [ja, ko]
     account: acc5
+    title_lang: ja     # 日本語チャンネル
 
   - audio: ja
-    subs: [ja, id]     # 上段: 日本語　下段: インドネシア語
+    subs: [ja, id]
     account: acc6
-
+    title_lang: ja     # 日本語チャンネル
