@@ -2,8 +2,8 @@
 """
 Pick TODAY’s podcast/video topic.
 
-1. できれば GPT-4o で “今日っぽい” キーワードを 1 行だけ取得  
-2. API 呼び出しが失敗したら SEED_TOPICS からランダムでフォールバック
+- まず GPT-4o に「今日向けの語学学習シーン」を1行だけリクエスト
+- API 呼び出しが失敗したら SEED_TOPICS からランダムでフォールバック
 """
 
 import random
@@ -14,36 +14,48 @@ import re
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ── フォールバック用プリセット ─────────────────────────
+# ── フォールバック用プリセット（実用シーン固定） ───────────────
 SEED_TOPICS: list[str] = [
-    # Tech & Science
-    "AI ethics", "quantum computing", "space exploration",
-    # Lifestyle & Culture
-    "sustainable travel", "mindfulness", "plant-based diets",
-    # Arts
-    "classical music", "digital illustration", "street photography",
+    # ホテル英語
+    "ホテル英語 - チェックイン",
+    "ホテル英語 - 朝食の案内",
+    "ホテル英語 - 部屋の設備説明",
+    "ホテル英語 - チェックアウト",
+
+    # 空港英会話
+    "空港英会話 - チェックインカウンター",
+    "空港英会話 - 保安検査",
+    "空港英会話 - 搭乗口での案内",
+    "空港英会話 - 機内でのやりとり",
+
+    # レストラン英語
+    "レストラン英語 - 入店と席案内",
+    "レストラン英語 - 注文",
+    "レストラン英語 - 料理の説明",
+    "レストラン英語 - 会計",
 ]
 
-# ────────────────────────────────────────────────────────
+# ────────────────────────────────────────
 def _clean(raw: str) -> str:
     """
-    GPT 応答に余計な「Sure, here is…」などが混ざっても
-    先頭行だけを抜き取り、引用符・句読点を削ぐ。
+    GPT 応答に余計な文が混ざっても
+    先頭行だけを抜き取り、引用符や記号を削る。
     """
     first_line = raw.strip().splitlines()[0]
-    topic = re.sub(r'^[\"“”\'\-•\s]*', "", first_line)   # 先頭の記号/空白
-    topic = re.sub(r'[\"“”\'\s]*$', "", topic)           # 末尾の記号/空白
+    topic = re.sub(r'^[\"“”\'\-•\s]*', "", first_line)   # 先頭
+    topic = re.sub(r'[\"“”\'\s]*$', "", topic)           # 末尾
     return topic
 
 
 def pick() -> str:
-    """Return one short topic phrase (ASCII/UTF-8)."""
+    """Return one topic phrase like 'ホテル英語 - チェックイン'."""
     today = datetime.date.today().isoformat()
 
     prompt = (
-        f"Today is {today}. Give me ONE short, trending topic idea for a"
-        " 60-90-second educational video. **Return ONLY the topic phrase** –"
-        " no explanations, no punctuation, no quotation marks."
+        f"Today is {today}. Suggest ONE short, practical topic for a language-learning video.\n"
+        "It must be in Japanese, format: '<大テーマ> - <具体シーン>'.\n"
+        "Examples: 'ホテル英語 - チェックイン', '空港英会話 - 保安検査'.\n"
+        "Return ONLY the phrase, no punctuation or quotes."
     )
 
     try:
@@ -56,8 +68,7 @@ def pick() -> str:
         topic = _clean(rsp.choices[0].message.content)
         return topic or random.choice(SEED_TOPICS)
 
-    except Exception as e:  # ネットワーク・キー無効など
-        # ログに残す場合は logging を使う
+    except Exception:
         return random.choice(SEED_TOPICS)
 
 
