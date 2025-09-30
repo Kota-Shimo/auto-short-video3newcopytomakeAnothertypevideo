@@ -161,7 +161,7 @@ def make_chapters_by_duration(durations, target_sections=4):
     t = 0.0
     while t + step < total:
         t += step
-        out.append(f"{_mmss(t)} Section}")
+        out.append(f"{_mmss(t)} Section")
     out.append(f"{_mmss(total)} Outro")
     return "\n".join(out)
 
