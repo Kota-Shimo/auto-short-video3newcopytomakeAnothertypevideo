@@ -42,7 +42,7 @@ def reset_temp():
     TEMP.mkdir(exist_ok=True)
 
 def sanitize_title(raw: str) -> str:
-    # 先頭の番号・箇条書き記号を除去（例: "1. ", "2) ", "- ", "• " など）
+    # 先頭の番号・箇条書き記号を除去
     title = re.sub(r"^\s*(?:\d+\s*[.)]|[-•・])\s*", "", raw)
     # 余分な空白を正規化
     title = re.sub(r"[\s\u3000]+", " ", title).strip()
@@ -64,9 +64,8 @@ LANG_NAME = {
     "ja": "Japanese","ko": "Korean",     "es": "Spanish",
 }
 
-# ---------- ✅ 新規追加：シードフレーズ生成 ----------
+# ---------- ✅ シードフレーズ ----------
 def _make_seed_phrase(topic: str, lang_code: str) -> str:
-    """動画冒頭の自然な一言（Let’s talk about〜の代わり）"""
     lang = LANG_NAME.get(lang_code, "English")
     prompt = (
         f"Write one very short opening sentence in {lang} "
@@ -172,7 +171,7 @@ def _concat_trim_to(mp_paths, max_sec):
     combined.export(TEMP/"full_raw.mp3", format="mp3")
     return new_durs
 
-def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size):
+def run_all(topic, turns, privacy, do_upload, chunk_size):
     for combo in COMBOS:
         audio_lang  = combo["audio"]
         subs        = combo["subs"]
@@ -180,14 +179,14 @@ def run_all(topic, turns, fsize_top, fsize_bot, privacy, do_upload, chunk_size):
         title_lang  = combo.get("title_lang", subs[1] if len(subs)>1 else audio_lang)
         logging.info(f"=== Combo: {audio_lang}, subs={subs}, account={account}, title_lang={title_lang} ===")
         run_one(topic, turns, audio_lang, subs, title_lang,
-                fsize_top, fsize_bot, privacy, account, do_upload, chunk_size)
+                privacy, account, do_upload, chunk_size)
 
 def run_one(topic, turns, audio_lang, subs, title_lang,
-            fsize_top, fsize_bot, yt_privacy, account, do_upload, chunk_size):
+            yt_privacy, account, do_upload, chunk_size):
     reset_temp()
 
     topic_for_dialogue = translate(topic, audio_lang) if audio_lang != "ja" else topic
-    seed_phrase = _make_seed_phrase(topic_for_dialogue, audio_lang)  # ✅ 導入文生成
+    seed_phrase = _make_seed_phrase(topic_for_dialogue, audio_lang)
     dialogue = make_dialogue(topic_for_dialogue, audio_lang, turns, seed_phrase=seed_phrase)
 
     mp_parts, sub_rows = [], [[] for _ in subs]
@@ -235,8 +234,6 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
         "--chunk", str(chunk_size),
         "--rows", str(len(subs)),
         "--out", str(final_mp4),
-        "--fsize-top", str(fsize_top),
-        "--fsize-bot", str(fsize_bot),
     ]
     logging.info("🔹 chunk_builder cmd: %s"," ".join(cmd))
     subprocess.run(cmd,check=True)
@@ -244,7 +241,7 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
     if not do_upload: return
 
     title=make_title(topic,title_lang)
-    desc=make_desc(topic,title_lang)  # Shorts なので章分けは省略
+    desc=make_desc(topic,title_lang)
     tags=make_tags(topic,audio_lang,subs,title_lang)
 
     upload(video_path=final_mp4,title=title,desc=desc,tags=tags,
@@ -256,11 +253,9 @@ if __name__=="__main__":
     ap=argparse.ArgumentParser()
     ap.add_argument("topic",help="会話テーマ")
     ap.add_argument("--turns",type=int,default=8)
-    ap.add_argument("--fsize-top",type=int,default=92)
-    ap.add_argument("--fsize-bot",type=int,default=78)
     ap.add_argument("--privacy",default="unlisted",choices=["public","unlisted","private"])
     ap.add_argument("--lines-only",action="store_true")
     ap.add_argument("--no-upload",action="store_true")
     ap.add_argument("--chunk",type=int,default=9999,help="Shortsは分割せず1本推奨")
     args=ap.parse_args()
-    run_all(args.topic,args.turns,args.fsize_top,args.fsize_bot,args.privacy,not args.no_upload,args.chunk)
+    run_all(args.topic,args.turns,args.privacy,not args.no_upload,args.chunk)
