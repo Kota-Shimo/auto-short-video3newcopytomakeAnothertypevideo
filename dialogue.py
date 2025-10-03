@@ -1,4 +1,3 @@
-# dialogue.py
 """Generate a two-person *discussion / debate* script via GPT-4o in any language."""
 
 from typing import List, Tuple
@@ -7,24 +6,28 @@ from config import OPENAI_API_KEY
 
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
-def make_dialogue(topic: str, lang: str, turns: int = 8) -> List[Tuple[str, str]]:
+def make_dialogue(topic: str, lang: str, turns: int = 8, seed_phrase: str = "") -> List[Tuple[str, str]]:
     """
-    Alice の最初の1行目は自前で固定。
+    Alice の最初の1行目は main.py 側から渡された seed_phrase を優先。
+    未指定なら従来の固定文を fallback。
     GPT には Bob から開始し、交互に会話を生成させる。
     合計 (2*turns) 行になるよう制御する。
     """
 
-    # ---- 言語別：Alice の導入セリフ（topic は main 側から渡される）----
-    if lang == "ja":
-        intro = f"Alice: 今日は「{topic}」について話そう。"
-    elif lang == "pt":
-        intro = f"Alice: Vamos falar sobre {topic} hoje."
-    elif lang == "id":
-        intro = f"Alice: Yuk, kita ngobrol soal {topic} hari ini."
-    elif lang == "ko":
-        intro = f"Alice: 오늘은 {topic}에 대해 이야기해보자."
-    else:  # default: English
-        intro = f"Alice: Let's talk about {topic} today."
+    # ---- Alice の導入セリフ ----
+    if seed_phrase:
+        intro = f"Alice: {seed_phrase}"
+    else:
+        if lang == "ja":
+            intro = f"Alice: 今日は「{topic}」について話そう。"
+        elif lang == "pt":
+            intro = f"Alice: Vamos falar sobre {topic} hoje."
+        elif lang == "id":
+            intro = f"Alice: Yuk, kita ngobrol soal {topic} hari ini."
+        elif lang == "ko":
+            intro = f"Alice: 오늘은 {topic}에 대해 이야기해보자."
+        else:  # default: English
+            intro = f"Alice: Let's talk about {topic} today."
 
     # ---- GPT へのプロンプト ----
     expected_gpt_lines = turns * 2 - 1  # Aliceの1行は固定 → 残りをGPTで生成
