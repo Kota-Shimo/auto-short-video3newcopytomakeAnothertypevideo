@@ -55,10 +55,7 @@ def xpos(w: int) -> int:
 
 # ---------- CJK 折り返し ----------
 def wrap_cjk(text: str, width_cjk: int = 14, width_latn: int = 16) -> str:
-    """
-    日本語/漢字は1文字が大きいので折り返し幅を短めに。
-    MoviePyのcaptionラップも使うが、事前の明示改行で安定させる。
-    """
+    """日本語/漢字は幅狭め、ラテンは少し広めに事前改行。"""
     if is_cjk(text):
         return "\n".join(textwrap.wrap(text, width_cjk, break_long_words=True))
     return "\n".join(textwrap.wrap(text, width_latn, break_long_words=True))
@@ -76,15 +73,15 @@ def _make_text(text: str, fsize: int, stroke: int) -> TextClip:
         color="white",
         stroke_color="black",
         stroke_width=stroke,
-        method="caption",
-        size=(TEXT_W, None),
+        method="caption",           # ← 本文は caption（ラップ用）
+        size=(TEXT_W, None),        #    幅は必ず指定
     )
 
 # ---------- 話者チップ（小さめのラベル） ----------
 def _make_speaker_chip(speaker: str, ref_fsize_top: int):
     """
     話者名を本文から分離。横幅を圧迫しないよう小さいチップに。
-    ref_fsize_top: 上段本文のフォントサイズを基準にチップサイズを決める。
+    caption は size 必須なので、ここは label を使用する。
     """
     if not speaker:
         return None, None
@@ -96,8 +93,7 @@ def _make_speaker_chip(speaker: str, ref_fsize_top: int):
         color="white",
         stroke_color="black",
         stroke_width=max(1, int(chip_fsize * 0.08)),
-        method="caption",
-        size=(None, None),
+        method="label",             # ★ 修正：label なら size 不要
     )
     pad_x, pad_y = 14, 8
     chip_bg = ColorClip((chip_txt.w + pad_x * 2, chip_txt.h + pad_y * 2), (0, 0, 0)).with_opacity(0.45)
@@ -159,13 +155,12 @@ def _auto_fit(top_body: str, bot_body: str | None, speaker: str | None,
         else:
             next_bot = 0
 
-        # 既に最小 → これ以上下げない（はみ出しを避けるため上方に寄せるのは y_pos で対応済み）
         size_top, size_bot = next_top, next_bot
         if size_top == MIN_FSIZE_TOP and (not bot_body or size_bot == MIN_FSIZE_BOT):
-            # 最小で確定（多少文字多めでもセーフエリアからはみ出さない）
+            # 最小で確定（多少文字が多くてもセーフエリアは守る）
             return (size_top, size_bot, chip_txt, chip_bg, top_clip, top_bg, bot_clip, bot_bg, block_h, y_pos)
 
-    # 念のためのフォールバック（理論上ここに来ない想定）
+    # 念のためのフォールバック
     chip_txt, chip_bg = _make_speaker_chip(speaker, size_top)
     top_clip = _make_text(top_body, size_top, st_top(size_top))
     top_bg   = _bg(top_clip)
