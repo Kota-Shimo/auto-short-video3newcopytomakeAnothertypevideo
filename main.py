@@ -61,6 +61,26 @@ LANG_NAME = {
     "ja": "Japanese","ko": "Korean",     "es": "Spanish",
 }
 
+# ---------- ✅ 新規追加：シードフレーズ生成 ----------
+def _make_seed_phrase(topic: str, lang_code: str) -> str:
+    """動画冒頭の自然な一言（Let’s talk about〜の代わり）"""
+    lang = LANG_NAME.get(lang_code, "English")
+    prompt = (
+        f"Write one very short opening sentence in {lang} "
+        f"to introduce a language-learning roleplay scene about: {topic}.\n"
+        "It should sound natural and motivating, ≤12 words.\n"
+        "Examples: 'Let’s practice a hotel check-in.' / 'Time to learn how to order food.'"
+    )
+    try:
+        rsp = GPT.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.6,
+        )
+        return rsp.choices[0].message.content.strip()
+    except Exception:
+        return ""
+
 def make_title(topic, title_lang: str):
     if title_lang == "ja":
         prompt = (
@@ -164,7 +184,8 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
     reset_temp()
 
     topic_for_dialogue = translate(topic, audio_lang) if audio_lang != "ja" else topic
-    dialogue = make_dialogue(topic_for_dialogue, audio_lang, turns)
+    seed_phrase = _make_seed_phrase(topic_for_dialogue, audio_lang)  # ✅ 導入文生成
+    dialogue = make_dialogue(topic_for_dialogue, audio_lang, turns, seed_phrase=seed_phrase)
 
     mp_parts, sub_rows = [], [[] for _ in subs]
     for i,(spk,line) in enumerate(dialogue,1):
