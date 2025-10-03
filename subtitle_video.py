@@ -13,7 +13,7 @@ FONT_JP   = str(FONT_DIR / "NotoSansJP-Bold.ttf")
 FONT_KO   = str(FONT_DIR / "malgunbd.ttf")
 
 # ---------- X 位置ずらし ----------
-SHIFT_X = 0                    # 横動画なので中央寄せ
+SHIFT_X = 0
 def xpos(w: int) -> int:
     return (SCREEN_W - w) // 2 + SHIFT_X
 
@@ -37,15 +37,15 @@ def pick_font(text: str) -> str:
             return FONT_JP
     return FONT_LATN
 
-# ============ レイアウト定数（横動画用） ============
-SCREEN_W, SCREEN_H = 1920, 1080
-DEFAULT_FSIZE_TOP  = 75   # ← デフォルト上段サイズ
-DEFAULT_FSIZE_BOT  = 70   # ← デフォルト下段サイズ
-TEXT_W             = 1500
-POS_Y              = 880
-LINE_GAP           = 26
-BOTTOM_MARGIN      = 30
-PAD_X, PAD_Y       = 22, 16
+# ============ レイアウト定数（縦動画用） ============
+SCREEN_W, SCREEN_H = 1080, 1920
+DEFAULT_FSIZE_TOP  = 92
+DEFAULT_FSIZE_BOT  = 78
+TEXT_W             = 900
+POS_Y              = 1450
+LINE_GAP           = 36
+BOTTOM_MARGIN      = 40
+PAD_X, PAD_Y       = 28, 20
 # ===================================================
 
 # ---------- 半透明黒帯 ----------
@@ -65,7 +65,6 @@ def build_video(
     """
     lines : [(speaker, row1_text, row2_text, duration_sec), ...]
     rows  : 1 = 上段のみ / 2 = 上段+下段
-    fsize_top / fsize_bot : 字幕フォントサイズを外部から可変指定
     """
     bg_base = ImageClip(bg_path).resized((SCREEN_W, SCREEN_H))
     clips = []
@@ -118,12 +117,10 @@ def build_video(
 
     video = concatenate_videoclips(clips, method="compose").with_audio(AudioFileClip(voice_mp3))
     video.write_videofile(
-    str(out_mp4),
-    fps=30,
-    codec="libx264",
-    audio_codec="aac",
-    temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
-    remove_temp=True
+        str(out_mp4),
+        fps=30,
+        codec="libx264",
+        audio_codec="aac",
+        temp_audiofile=str(Path("temp") / "temp-audio.m4a"),
+        remove_temp=True
     )
-
-# =====================================================
