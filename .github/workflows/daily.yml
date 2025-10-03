@@ -1,14 +1,16 @@
 name: Auto-Podcast-Daily
 
 on:
-  # ① JST09:00 ② JST15:00 ③ JST21:00
+  # 実行時間: JST 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00
   schedule:
-    - cron: '0 0  * * *'    # UTC00:00 → JST09:00
-    - cron: '0 6  * * *'    # UTC06:00 → JST15:00
-    - cron: '0 12 * * *'    # UTC12:00 → JST21:00
-    - cron: '0 3  * * *'    # UTC00:00 → JST09:00
-    - cron: '0 8  * * *'    # UTC06:00 → JST15:00
-    - cron: '0 11 * * *'    # UTC12:00 → JST21:00
+    - cron: '0 15 * * *'   # UTC15:00 → JST00:00
+    - cron: '0 18 * * *'   # UTC18:00 → JST03:00
+    - cron: '0 21 * * *'   # UTC21:00 → JST06:00
+    - cron: '0 0  * * *'   # UTC00:00 → JST09:00
+    - cron: '0 3  * * *'   # UTC03:00 → JST12:00
+    - cron: '0 6  * * *'   # UTC06:00 → JST15:00
+    - cron: '0 9  * * *'   # UTC09:00 → JST18:00
+    - cron: '0 12 * * *'   # UTC12:00 → JST21:00
   workflow_dispatch:        # 手動トリガー
 
 concurrency:
