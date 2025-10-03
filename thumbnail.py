@@ -1,7 +1,7 @@
 # thumbnail.py – Shorts portrait thumbnail (scene | phrase), centered glass panel
 from pathlib import Path
 from io import BytesIO
-import textwrap, logging, requests
+import textwrap, logging, requests, random
 from PIL import (
     Image, ImageDraw, ImageFont, ImageFilter,
     ImageEnhance, ImageOps
@@ -56,6 +56,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 def _unsplash(topic: str) -> Image.Image:
     """
     Unsplash portrait → 1080×1920 fit.
+    ランダムシードを付けて毎回違う画像を取得。
     失敗時はダークグラデーション。
     """
     if not UNSPLASH_ACCESS_KEY:
@@ -64,7 +65,9 @@ def _unsplash(topic: str) -> Image.Image:
     url = (
         "https://api.unsplash.com/photos/random"
         f"?query={requests.utils.quote(topic)}"
-        f"&orientation=portrait&content_filter=high&client_id={UNSPLASH_ACCESS_KEY}"
+        f"&orientation=portrait&content_filter=high"
+        f"&client_id={UNSPLASH_ACCESS_KEY}"
+        f"&sig={random.randint(1, 999999)}"   # ← キャッシュ回避で毎回ランダム
     )
     try:
         r = requests.get(url, timeout=15); r.raise_for_status()
