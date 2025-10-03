@@ -42,7 +42,10 @@ def reset_temp():
     TEMP.mkdir(exist_ok=True)
 
 def sanitize_title(raw: str) -> str:
-    title = re.sub(r"[\s\u3000]+", " ", raw).strip()
+    # 先頭の番号・箇条書き記号を除去（例: "1. ", "2) ", "- ", "• " など）
+    title = re.sub(r"^\s*(?:\d+\s*[.)]|[-•・])\s*", "", raw)
+    # 余分な空白を正規化
+    title = re.sub(r"[\s\u3000]+", " ", title).strip()
     return title[:97] + "…" if len(title) > 100 else title or "Auto Video"
 
 TOP_KEYWORDS = ["ホテル英語", "空港英会話", "レストラン英語", "仕事で使う英語", "旅行英会話", "接客英語"]
