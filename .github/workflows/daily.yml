@@ -69,6 +69,6 @@ jobs:
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
         run: |
           python main.py "${{ steps.topic.outputs.topic }}" \
-            --turns 5 \
+            --turns 6 \
             --privacy public \
             --chunk 40
