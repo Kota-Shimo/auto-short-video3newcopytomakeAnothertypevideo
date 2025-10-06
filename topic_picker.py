@@ -1,85 +1,76 @@
+# topic_picker.py
 """
-topic_picker.py – Pick an optimal English-learning topic for today’s video.
-新仕様:
-- GPT に「英語学習者向けの今日の最適トピック」を考えさせる
-- カテゴリや目的を含む JSON 出力
-- 失敗時は SEED_TOPICS からランダムにフォールバック
+Pick TODAY’s podcast/video topic.
+
+- まず GPT-4o に「今日向けの語学学習シーン」を1行だけリクエスト
+- API 呼び出しが失敗したら SEED_TOPICS からランダムでフォールバック
 """
 
 import random
 import datetime
 import os
+import openai
 import re
-import json
-from openai import OpenAI
 
-GPT = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ── フォールバック用プリセット ───────────────
-SEED_TOPICS = [
-    {"topic": "ホテル英語 - チェックイン", "category": "旅行", "focus": "基本表現"},
-    {"topic": "レストラン英語 - 注文", "category": "食事", "focus": "会話練習"},
-    {"topic": "空港英会話 - 保安検査", "category": "旅行", "focus": "質問応答"},
-    {"topic": "仕事で使う英語 - 自己紹介", "category": "ビジネス", "focus": "スモールトーク"},
-    {"topic": "旅行英会話 - 道を尋ねる", "category": "日常", "focus": "実践会話"},
-    {"topic": "接客英語 - おすすめを伝える", "category": "仕事", "focus": "接客応対"},
+# ── フォールバック用プリセット（実用シーン固定） ───────────────
+SEED_TOPICS: list[str] = [
+    # ホテル英語
+    "ホテル英語 - チェックイン",
+    "ホテル英語 - 朝食の案内",
+    "ホテル英語 - 部屋の設備説明",
+    "ホテル英語 - チェックアウト",
+
+    # 空港英会話
+    "空港英会話 - チェックインカウンター",
+    "空港英会話 - 保安検査",
+    "空港英会話 - 搭乗口での案内",
+    "空港英会話 - 機内でのやりとり",
+
+    # レストラン英語
+    "レストラン英語 - 入店と席案内",
+    "レストラン英語 - 注文",
+    "レストラン英語 - 料理の説明",
+    "レストラン英語 - 会計",
 ]
 
+# ────────────────────────────────────────
 def _clean(raw: str) -> str:
-    """GPT応答に余計な文が混ざっても、先頭行のみ抜き出す。"""
+    """
+    GPT 応答に余計な文が混ざっても
+    先頭行だけを抜き取り、引用符や記号を削る。
+    """
     first_line = raw.strip().splitlines()[0]
-    topic = re.sub(r'^[\"“”\'\-•\s]*', "", first_line)
-    topic = re.sub(r'[\"“”\'\s]*$', "", topic)
-    return topic.strip()
+    topic = re.sub(r'^[\"“”\'\-•\s]*', "", first_line)   # 先頭
+    topic = re.sub(r'[\"“”\'\s]*$', "", topic)           # 末尾
+    return topic
 
-def pick() -> dict:
-    """
-    Return a dict like:
-    {
-      "topic": "ホテル英語 - チェックイン",
-      "category": "旅行",
-      "focus": "実践会話",
-      "reason": "ホテルでのチェックイン会話は最も頻出だから"
-    }
-    """
+
+def pick() -> str:
+    """Return one topic phrase like 'ホテル英語 - チェックイン'."""
     today = datetime.date.today().isoformat()
 
-    prompt = f"""
-You are an English-teaching content strategist.
-Today is {today}.
-Suggest ONE concise, useful topic for an English-learning video (for beginners to intermediates).
-Return JSON like this:
-
-{{
-  "topic": "<in Japanese, e.g. ホテル英語 - チェックイン>",
-  "category": "<broad domain: 旅行 / ビジネス / 日常 / 文法 / 発音>",
-  "focus": "<learning goal: 会話練習 / 発音 / ボキャブラリー / 文法 / 表現>",
-  "reason": "<1 short reason why this is a good choice>"
-}}
-
-Rules:
-- Topic must be in Japanese.
-- Keep it short and natural.
-- Return ONLY valid JSON.
-"""
+    prompt = (
+        f"Today is {today}. Suggest ONE short, practical topic for a language-learning video.\n"
+        "It must be in Japanese, format: '<大テーマ> - <具体シーン>'.\n"
+        "Examples: 'ホテル英語 - チェックイン', '空港英会話 - 保安検査'.\n"
+        "Return ONLY the phrase, no punctuation or quotes."
+    )
 
     try:
-        rsp = GPT.chat.completions.create(
+        rsp = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            response_format={"type": "json_object"},
+            timeout=20,
         )
-        data = json.loads(rsp.choices[0].message.content)
-        if not data.get("topic"):
-            raise ValueError("Empty GPT output")
-        return data
+        topic = _clean(rsp.choices[0].message.content)
+        return topic or random.choice(SEED_TOPICS)
 
-    except Exception as e:
-        # GPTが落ちた場合はランダムフォールバック
-        fallback = random.choice(SEED_TOPICS)
-        fallback["reason"] = "GPT fallback"
-        return fallback
+    except Exception:
+        return random.choice(SEED_TOPICS)
+
 
 if __name__ == "__main__":
-    print(json.dumps(pick(), ensure_ascii=False, indent=2))
+    print(pick())
