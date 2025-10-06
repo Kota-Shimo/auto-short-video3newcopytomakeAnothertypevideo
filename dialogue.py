@@ -1,4 +1,4 @@
-"""Generate a two-person *discussion / debate* script via GPT-4o in any language."""
+"""Generate a two-person *discussion / roleplay* script via GPT-4o in any language."""
 
 from typing import List, Tuple
 from openai import OpenAI
@@ -8,72 +8,55 @@ openai = OpenAI(api_key=OPENAI_API_KEY)
 
 def make_dialogue(topic: str, lang: str, turns: int = 8, seed_phrase: str = "") -> List[Tuple[str, str]]:
     """
-    Alice の最初の1行目は main.py 側から渡された seed_phrase を優先。
-    未指定なら従来の固定文を fallback。
-    GPT には Bob から開始し、交互に会話を生成させる。
-    合計 (2*turns) 行になるよう制御する。
+    会話形式を自然に生成。
+    - seed_phrase があればそれを参考にトーンや冒頭の流れを調整。
+    - Alice/Bob が交互に話す、短い自然なやり取り。
+    - 最後の1行は冒頭のキーフレーズや話題を軽くリフレインし、
+      ループ感を演出する。
     """
 
-    # ---- Alice の導入セリフ ----
-    if seed_phrase:
-        intro = f"Alice: {seed_phrase}"
+    # --- 言語別トピック表示（プロンプト補助用） ---
+    if lang == "ja":
+        topic_hint = f"「{topic}」"
     else:
-        if lang == "ja":
-            intro = f"Alice: 今日は「{topic}」について話そう。"
-        elif lang == "pt":
-            intro = f"Alice: Vamos falar sobre {topic} hoje."
-        elif lang == "id":
-            intro = f"Alice: Yuk, kita ngobrol soal {topic} hari ini."
-        elif lang == "ko":
-            intro = f"Alice: 오늘은 {topic}에 대해 이야기해보자."
-        else:  # default: English
-            intro = f"Alice: Let's talk about {topic} today."
+        topic_hint = topic
 
-    # ---- GPT へのプロンプト ----
-    expected_gpt_lines = turns * 2 - 1  # Aliceの1行は固定 → 残りをGPTで生成
+    # --- GPTへ与えるプロンプト ---
     prompt = (
-        f"You are a professional {lang.upper()} speaker. "
-        f"Write a conversation EXCLUSIVELY in {lang} between Alice and Bob.\n\n"
-        f"Topic: \"{topic}\".\n"
-        f"The first line is already fixed:\n{intro}\n\n"
-        f"Continue the dialogue starting with Bob, alternating strictly Alice/Bob. "
-        f"Produce EXACTLY {expected_gpt_lines} lines (no more, no fewer).\n\n"
-        "Formatting rules:\n"
-        f"1) The entire conversation MUST be in {lang} only. Do not use any other language.\n"
-        "2) Output ONLY the dialogue lines, no headings or explanations.\n"
-        "3) Each line must begin with 'Alice:' or 'Bob:' (ASCII colon).\n"
-        "4) Do NOT use ellipses ('...') or bullet points.\n"
-        "5) Keep it casual and natural, each line concise.\n"
+        f"You are a native-level {lang.upper()} dialogue writer.\n"
+        f"Write a short, natural conversation in {lang} between Alice and Bob.\n\n"
+        f"Scene topic: {topic_hint}\n"
+        f"Tone reference (seed phrase): \"{seed_phrase}\" (use only as mood/style hint, don't repeat it literally).\n\n"
+        f"Rules:\n"
+        f"1. Alternate strictly: Alice, Bob, Alice, Bob...\n"
+        f"2. Produce exactly {turns * 2} lines.\n"
+        f"3. Each line must begin with 'Alice:' or 'Bob:' followed by one short, natural sentence.\n"
+        f"4. Stay entirely in {lang}.\n"
+        f"5. Avoid ellipses (...), emojis, or lists.\n"
+        f"6. Keep sentences conversational, friendly, and realistic.\n"
+        f"7. The final line should softly echo or reference the main topic or the hook idea, "
+        f"to make it feel like a loop or callback ending.\n"
+        f"8. Output only the dialogue lines (no explanation or notes)."
     )
 
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,  # 言語逸脱を抑える
+        temperature=0.5,  # 安定したトーン
     )
 
-    # GPT 応答から "Alice:" / "Bob:" で始まる行のみ抽出
-    lines_from_gpt = [
-        l.strip() for l in rsp.choices[0].message.content.splitlines()
-        if l.strip().startswith(("Alice:", "Bob:"))
-    ]
+    raw_output = rsp.choices[0].message.content.strip().splitlines()
+    lines = [l.strip() for l in raw_output if l.strip().startswith(("Alice:", "Bob:"))]
 
-    # もし GPT が間違って Alice の冒頭を含んでしまった場合 → 除外
-    if lines_from_gpt and lines_from_gpt[0].startswith("Alice:"):
-        lines_from_gpt = lines_from_gpt[1:]
-
-    # 最終行リスト: イントロ + GPT生成
-    raw_lines = [intro] + lines_from_gpt
-
-    # 行数調整（多すぎる場合はカット、足りない場合はそのまま）
-    max_lines = turns * 2
-    raw_lines = raw_lines[:max_lines]
-
-    # "Alice: こんにちは" → ("Alice", "こんにちは") に整形
+    # --- フォーマット整形 ---
     parsed: List[Tuple[str, str]] = []
-    for ln in raw_lines:
+    for ln in lines[: turns * 2]:
         if ":" in ln:
             spk, txt = ln.split(":", 1)
             parsed.append((spk.strip(), txt.strip()))
+
+    # --- 不足補正（安全策）---
+    while len(parsed) < turns * 2:
+        parsed.append(("Alice" if len(parsed) % 2 == 0 else "Bob", ""))
 
     return parsed
