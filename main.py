@@ -7,7 +7,7 @@ main.py – GPT で会話 → OpenAI TTS → 「lines.json & full.mp3」を作�
 Shorts 最適化版:
 - 縦 1080x1920 向け
 - 60 秒以内に自動トリム
-- サムネイルは第二字幕言語を優先（表示されない場合あり）
+- 冒頭に hook（seed_phrase）を置き、終盤はループ感を強調
 """
 
 import argparse, logging, re, json, subprocess
@@ -29,10 +29,11 @@ from thumbnail      import make_thumbnail
 from upload_youtube import upload
 
 GPT = OpenAI()
-
 MAX_SHORTS_SEC = 59.0   # Shorts 判定のための上限（安全マージン）
 
+# ───────────────────────────────────────────────
 # combos.yaml 読み込み
+# ───────────────────────────────────────────────
 with open(BASE / "combos.yaml", encoding="utf-8") as f:
     COMBOS = yaml.safe_load(f)["combos"]
 
@@ -42,16 +43,13 @@ def reset_temp():
     TEMP.mkdir(exist_ok=True)
 
 def sanitize_title(raw: str) -> str:
-    # 先頭の番号・箇条書き記号を除去
     title = re.sub(r"^\s*(?:\d+\s*[.)]|[-•・])\s*", "", raw)
-    # 余分な空白を正規化
     title = re.sub(r"[\s\u3000]+", " ", title).strip()
     return title[:97] + "…" if len(title) > 100 else title or "Auto Video"
 
-TOP_KEYWORDS = ["ホテル英語", "空港英会話", "レストラン英語", "仕事で使う英語", "旅行英会話", "接客英語"]
+TOP_KEYWORDS = ["ホテル英語","空港英会話","レストラン英語","仕事で使う英語","旅行英会話","接客英語"]
 
 def score_title(t: str) -> int:
-    t = t.strip()
     score = 0
     if any(t.startswith(k) for k in TOP_KEYWORDS): score += 20
     if re.search(r"\d+|チェックイン|注文|予約|例文|空港|ホテル|レストラン|面接|受付", t): score += 15
@@ -61,87 +59,78 @@ def score_title(t: str) -> int:
 
 LANG_NAME = {
     "en": "English", "pt": "Portuguese", "id": "Indonesian",
-    "ja": "Japanese","ko": "Korean",     "es": "Spanish",
+    "ja": "Japanese","ko": "Korean", "es": "Spanish",
 }
 
-# ---------- ✅ シードフレーズ ----------
+# ───────────────────────────────────────────────
+# ✅ HOOK 生成 (seed_phrase)
+# ───────────────────────────────────────────────
 def _make_seed_phrase(topic: str, lang_code: str) -> str:
     lang = LANG_NAME.get(lang_code, "English")
     prompt = (
-        f"Write one very short opening sentence in {lang} "
-        f"to introduce a language-learning roleplay scene about: {topic}.\n"
-        "It should sound natural and motivating, ≤12 words.\n"
-        "Examples: 'Let’s practice a hotel check-in.' / 'Time to learn how to order food.'"
+        f"Write one short hook sentence in {lang} that immediately grabs attention "
+        f"for a language-learning roleplay about {topic}. "
+        "It should sound natural and motivating, ≤10 words, and make viewers curious.\n"
+        "Examples: 'Can you handle this hotel check-in?' / "
+        "'Let’s see how you’d order food in English!'"
     )
     try:
         rsp = GPT.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
+            messages=[{"role":"user","content":prompt}],
+            temperature=0.7,
         )
         return rsp.choices[0].message.content.strip()
     except Exception:
         return ""
 
+# ───────────────────────────────────────────────
+# YouTube タイトル・説明・タグ生成
+# ───────────────────────────────────────────────
 def make_title(topic, title_lang: str):
     if title_lang == "ja":
         prompt = (
             "You are a YouTube copywriter.\n"
             "Generate 5 concise Japanese titles (each ≤28 JP chars) for a LANGUAGE-LEARNING video.\n"
             "Each title must start with a strong scenario keyword and include a benefit.\n"
-            f"Scenario/topic: {topic}\n"
-            "Return 5 lines only."
+            f"Scenario/topic: {topic}\nReturn 5 lines only."
         )
     else:
         prompt = (
             f"You are a YouTube copywriter.\n"
-            f"Generate 5 concise {LANG_NAME.get(title_lang,'English')} titles (each ≤55 chars).\n"
-            "Each title should be clear and benefit-driven.\n"
-            f"Topic: {topic}\n"
-            "Return 5 lines only."
+            f"Generate 5 concise {LANG_NAME.get(title_lang,'English')} titles (≤55 chars).\n"
+            f"Topic: {topic}\nEach should sound clear, emotional, and benefit-driven.\nReturn 5 lines only."
         )
-    rsp = GPT.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-    )
+    rsp = GPT.chat.completions.create(model="gpt-4o-mini",
+        messages=[{"role":"user","content":prompt}], temperature=0.7)
     cands = [sanitize_title(x) for x in rsp.choices[0].message.content.split("\n") if x.strip()]
     if title_lang == "ja":
         cands = [t if any(t.startswith(k) for k in TOP_KEYWORDS) else f"{topic} {t}" for t in cands]
-        return sorted(cands, key=score_title, reverse=True)[0][:28]
+        return sorted(cands,key=score_title,reverse=True)[0][:28]
     else:
-        return max(cands, key=len)[:55]
+        return max(cands,key=len)[:55]
 
 def make_desc(topic, title_lang: str):
     prompt_desc = (
-        f"Write one sentence (≤90 chars) in {LANG_NAME.get(title_lang,'English')} "
-        f"summarising \"{topic}\" and ending with a call-to-action."
+        f"Write one catchy summary (≤90 chars) in {LANG_NAME.get(title_lang,'English')} "
+        f"for a YouTube Shorts about \"{topic}\". End with a call-to-action."
     )
-    rsp = GPT.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role":"user","content":prompt_desc}],
-        temperature=0.5,
-    )
+    rsp = GPT.chat.completions.create(model="gpt-4o-mini",
+        messages=[{"role":"user","content":prompt_desc}], temperature=0.5)
     base = rsp.choices[0].message.content.strip()
-
     prompt_tags = (
-        f"List 2 or 3 popular hashtags in {LANG_NAME.get(title_lang,'English')} "
-        "used by language learners. Only hashtags, space separated."
+        f"List 2 or 3 short hashtags in {LANG_NAME.get(title_lang,'English')} "
+        "related to language learning or conversation."
     )
-    tag_rsp = GPT.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role":"user","content":prompt_tags}],
-        temperature=0.3,
-    )
+    tag_rsp = GPT.chat.completions.create(model="gpt-4o-mini",
+        messages=[{"role":"user","content":prompt_tags}], temperature=0.3)
     hashtags = tag_rsp.choices[0].message.content.strip().replace("\n"," ")
     return f"{base} {hashtags}"
 
 def make_tags(topic, audio_lang, subs, title_lang):
-    tags = [
-        topic, "language learning",
+    tags = [topic, "language learning",
         f"{LANG_NAME.get(title_lang,'English')} study",
-        f"{LANG_NAME.get(title_lang,'English')} practice",
-    ]
+        f"{LANG_NAME.get(title_lang,'English')} practice"]
     if title_lang == "ja":
         tags.extend(["英会話","旅行英会話","接客英語","仕事で使う英語"])
     for code in subs[1:]:
@@ -149,8 +138,10 @@ def make_tags(topic, audio_lang, subs, title_lang):
             tags.extend([f"{LANG_NAME[code]} subtitles", f"Learn {LANG_NAME[code]}"])
     return list(dict.fromkeys(tags))[:15]
 
+# ───────────────────────────────────────────────
+# 音声結合・トリム
+# ───────────────────────────────────────────────
 def _concat_trim_to(mp_paths, max_sec):
-    """mp3 を連結して max_sec で打ち切り。"""
     max_ms = int(max_sec * 1000)
     combined = AudioSegment.silent(duration=0)
     new_durs, elapsed = [], 0
@@ -171,6 +162,9 @@ def _concat_trim_to(mp_paths, max_sec):
     combined.export(TEMP/"full_raw.mp3", format="mp3")
     return new_durs
 
+# ───────────────────────────────────────────────
+# 実行
+# ───────────────────────────────────────────────
 def run_all(topic, turns, privacy, do_upload, chunk_size):
     for combo in COMBOS:
         audio_lang  = combo["audio"]
@@ -178,11 +172,9 @@ def run_all(topic, turns, privacy, do_upload, chunk_size):
         account     = combo.get("account","default")
         title_lang  = combo.get("title_lang", subs[1] if len(subs)>1 else audio_lang)
         logging.info(f"=== Combo: {audio_lang}, subs={subs}, account={account}, title_lang={title_lang} ===")
-        run_one(topic, turns, audio_lang, subs, title_lang,
-                privacy, account, do_upload, chunk_size)
+        run_one(topic, turns, audio_lang, subs, title_lang, privacy, account, do_upload, chunk_size)
 
-def run_one(topic, turns, audio_lang, subs, title_lang,
-            yt_privacy, account, do_upload, chunk_size):
+def run_one(topic, turns, audio_lang, subs, title_lang, yt_privacy, account, do_upload, chunk_size):
     reset_temp()
 
     topic_for_dialogue = translate(topic, audio_lang) if audio_lang != "ja" else topic
@@ -190,72 +182,71 @@ def run_one(topic, turns, audio_lang, subs, title_lang,
     dialogue = make_dialogue(topic_for_dialogue, audio_lang, turns, seed_phrase=seed_phrase)
 
     mp_parts, sub_rows = [], [[] for _ in subs]
-    for i,(spk,line) in enumerate(dialogue,1):
+    for i, (spk, line) in enumerate(dialogue, 1):
         if not line.strip(): continue
-        mp = TEMP/f"{i:02d}.mp3"
+        mp = TEMP / f"{i:02d}.mp3"
         speak(audio_lang, spk, line, mp)
         mp_parts.append(mp)
-        for r,lang in enumerate(subs):
-            sub_rows[r].append(line if lang==audio_lang else translate(line,lang))
+        for r, lang in enumerate(subs):
+            sub_rows[r].append(line if lang==audio_lang else translate(line, lang))
 
-    # 60秒以内にトリム
     new_durs = _concat_trim_to(mp_parts, MAX_SHORTS_SEC)
     enhance(TEMP/"full_raw.mp3", TEMP/"full.mp3")
 
-    bg_png = TEMP/"bg.png"
+    bg_png = TEMP / "bg.png"
     fetch_bg(topic, bg_png)
 
     valid_dialogue = [d for d in dialogue if d[1].strip()]
     valid_dialogue = valid_dialogue[:len(new_durs)]
 
     lines_data = []
-    for i,((spk,txt),dur) in enumerate(zip(valid_dialogue,new_durs)):
-        row=[spk]
+    for i, ((spk, txt), dur) in enumerate(zip(valid_dialogue, new_durs)):
+        row = [spk]
         for r in range(len(subs)):
             row.append(sub_rows[r][i])
         row.append(dur)
         lines_data.append(row)
 
-    (TEMP/"lines.json").write_text(json.dumps(lines_data,ensure_ascii=False,indent=2),encoding="utf-8")
+    (TEMP/"lines.json").write_text(json.dumps(lines_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if args.lines_only: return
 
-    thumb = TEMP/"thumbnail.jpg"
-    thumb_lang = subs[1] if len(subs)>1 else audio_lang
+    thumb = TEMP / "thumbnail.jpg"
+    thumb_lang = subs[1] if len(subs) > 1 else audio_lang
     make_thumbnail(topic, thumb_lang, thumb)
 
-    stamp=datetime.now().strftime("%Y%m%d_%H%M%S")
-    final_mp4=OUTPUT/f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
-    final_mp4.parent.mkdir(parents=True,exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_mp4 = OUTPUT / f"{audio_lang}-{'_'.join(subs)}_{stamp}.mp4"
+    final_mp4.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd=[
+    cmd = [
         "python", str(BASE/"chunk_builder.py"),
         str(TEMP/"lines.json"), str(TEMP/"full.mp3"), str(bg_png),
         "--chunk", str(chunk_size),
         "--rows", str(len(subs)),
         "--out", str(final_mp4),
     ]
-    logging.info("🔹 chunk_builder cmd: %s"," ".join(cmd))
-    subprocess.run(cmd,check=True)
+    logging.info("🔹 chunk_builder cmd: %s", " ".join(cmd))
+    subprocess.run(cmd, check=True)
 
     if not do_upload: return
 
-    title=make_title(topic,title_lang)
-    desc=make_desc(topic,title_lang)
-    tags=make_tags(topic,audio_lang,subs,title_lang)
+    title = make_title(topic, title_lang)
+    desc  = make_desc(topic, title_lang)
+    tags  = make_tags(topic, audio_lang, subs, title_lang)
 
-    upload(video_path=final_mp4,title=title,desc=desc,tags=tags,
-           privacy=yt_privacy,account=account,thumbnail=thumb,
-           default_lang=audio_lang)
+    upload(video_path=final_mp4, title=title, desc=desc, tags=tags,
+           privacy=yt_privacy, account=account, thumbnail=thumb, default_lang=audio_lang)
 
-if __name__=="__main__":
-    logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
-    ap=argparse.ArgumentParser()
-    ap.add_argument("topic",help="会話テーマ")
-    ap.add_argument("--turns",type=int,default=8)
-    ap.add_argument("--privacy",default="unlisted",choices=["public","unlisted","private"])
-    ap.add_argument("--lines-only",action="store_true")
-    ap.add_argument("--no-upload",action="store_true")
-    ap.add_argument("--chunk",type=int,default=9999,help="Shortsは分割せず1本推奨")
-    args=ap.parse_args()
-    run_all(args.topic,args.turns,args.privacy,not args.no_upload,args.chunk)
+# ───────────────────────────────────────────────
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("topic", help="会話テーマ")
+    ap.add_argument("--turns", type=int, default=8)
+    ap.add_argument("--privacy", default="unlisted", choices=["public","unlisted","private"])
+    ap.add_argument("--lines-only", action="store_true")
+    ap.add_argument("--no-upload", action="store_true")
+    ap.add_argument("--chunk", type=int, default=9999, help="Shortsは分割せず1本推奨")
+    args = ap.parse_args()
+    run_all(args.topic, args.turns, args.privacy, not args.no_upload, args.chunk)
