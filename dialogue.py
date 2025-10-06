@@ -1,79 +1,91 @@
-"""Generate a two-person *discussion / debate* script via GPT-4o in any language."""
+"""
+dialogue.py – GPT により英語学習向けショート台本を生成。
+構成: Hook（導入）→ Main（説明）→ Callback（締め）
+"""
 
-from typing import List, Tuple
+import json
+from typing import Dict
 from openai import OpenAI
 from config import OPENAI_API_KEY
 
-openai = OpenAI(api_key=OPENAI_API_KEY)
+GPT = OpenAI(api_key=OPENAI_API_KEY)
 
-def make_dialogue(topic: str, lang: str, turns: int = 8, seed_phrase: str = "") -> List[Tuple[str, str]]:
+def make_dialogue(topic: str, lang: str, turns: int = 8, seed_phrase: str = "") -> Dict:
     """
-    Alice の最初の1行目は main.py 側から渡された seed_phrase を優先。
-    未指定なら従来の固定文を fallback。
-    GPT には Bob から開始し、交互に会話を生成させる。
-    合計 (2*turns) 行になるよう制御する。
+    Generate a structured short-form learning script:
+      - hook: attention-grabbing start
+      - main: explanation or examples (3–5 short lines)
+      - callback: closing line that links back to the hook
+    Returns a dict:
+    {
+      "title": "string",
+      "segments": [
+        {"role": "hook", "text": "..."},
+        {"role": "main", "text": "..."},
+        {"role": "callback", "text": "..."}
+      ]
+    }
     """
 
-    # ---- Alice の導入セリフ ----
-    if seed_phrase:
-        intro = f"Alice: {seed_phrase}"
-    else:
-        if lang == "ja":
-            intro = f"Alice: 今日は「{topic}」について話そう。"
-        elif lang == "pt":
-            intro = f"Alice: Vamos falar sobre {topic} hoje."
-        elif lang == "id":
-            intro = f"Alice: Yuk, kita ngobrol soal {topic} hari ini."
-        elif lang == "ko":
-            intro = f"Alice: 오늘은 {topic}에 대해 이야기해보자."
-        else:  # default: English
-            intro = f"Alice: Let's talk about {topic} today."
+    # --- Prompt設計 ---
+    prompt = f"""
+You are a professional {lang.upper()} scriptwriter for YouTube Shorts.
+Create a short (≤45 seconds) educational video script for language learners.
 
-    # ---- GPT へのプロンプト ----
-    expected_gpt_lines = turns * 2 - 1  # Aliceの1行は固定 → 残りをGPTで生成
-    prompt = (
-        f"You are a professional {lang.upper()} speaker. "
-        f"Write a conversation EXCLUSIVELY in {lang} between Alice and Bob.\n\n"
-        f"Topic: \"{topic}\".\n"
-        f"The first line is already fixed:\n{intro}\n\n"
-        f"Continue the dialogue starting with Bob, alternating strictly Alice/Bob. "
-        f"Produce EXACTLY {expected_gpt_lines} lines (no more, no fewer).\n\n"
-        "Formatting rules:\n"
-        f"1) The entire conversation MUST be in {lang} only. Do not use any other language.\n"
-        "2) Output ONLY the dialogue lines, no headings or explanations.\n"
-        "3) Each line must begin with 'Alice:' or 'Bob:' (ASCII colon).\n"
-        "4) Do NOT use ellipses ('...') or bullet points.\n"
-        "5) Keep it casual and natural, each line concise.\n"
-    )
+Topic: "{topic}"
 
-    rsp = openai.chat.completions.create(
+Structure:
+1. Hook — Start with an engaging or surprising line (1 short sentence).
+2. Main — Explain the phrase or give 2–3 short conversational examples.
+3. Callback — End with a satisfying line that connects back to the Hook.
+
+Requirements:
+- Entire script must be in {lang}.
+- Keep each line under 12 words for readability.
+- Natural tone, emotionally engaging, slightly conversational.
+- Do NOT include any explanations outside the dialogue.
+- Return ONLY a JSON object with this structure:
+
+{{
+  "title": "string",
+  "segments": [
+    {{"role": "hook", "text": "..."}},
+    {{"role": "main", "text": "..."}},
+    {{"role": "main", "text": "..."}},
+    {{"role": "callback", "text": "..."}}
+  ]
+}}
+"""
+
+    rsp = GPT.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,  # 言語逸脱を抑える
+        temperature=0.6,
+        response_format={"type": "json_object"},
     )
 
-    # GPT 応答から "Alice:" / "Bob:" で始まる行のみ抽出
-    lines_from_gpt = [
-        l.strip() for l in rsp.choices[0].message.content.splitlines()
-        if l.strip().startswith(("Alice:", "Bob:"))
-    ]
+    try:
+        data = json.loads(rsp.choices[0].message.content)
+    except Exception:
+        # GPTの出力がJSONでない場合の安全フォールバック
+        data = {
+            "title": topic,
+            "segments": [
+                {"role": "hook", "text": seed_phrase or f"Let's talk about {topic}."},
+                {"role": "main", "text": f"This phrase means '{topic}' in daily life."},
+                {"role": "callback", "text": "Now you can use it naturally!"},
+            ],
+        }
 
-    # もし GPT が間違って Alice の冒頭を含んでしまった場合 → 除外
-    if lines_from_gpt and lines_from_gpt[0].startswith("Alice:"):
-        lines_from_gpt = lines_from_gpt[1:]
+    # --- 後処理: 構造正規化 ---
+    if "segments" not in data:
+        data = {
+            "title": topic,
+            "segments": [
+                {"role": "hook", "text": seed_phrase or f"Let's talk about {topic}."},
+                {"role": "main", "text": f"This phrase means '{topic}' in daily life."},
+                {"role": "callback", "text": "Now you can use it naturally!"},
+            ],
+        }
 
-    # 最終行リスト: イントロ + GPT生成
-    raw_lines = [intro] + lines_from_gpt
-
-    # 行数調整（多すぎる場合はカット、足りない場合はそのまま）
-    max_lines = turns * 2
-    raw_lines = raw_lines[:max_lines]
-
-    # "Alice: こんにちは" → ("Alice", "こんにちは") に整形
-    parsed: List[Tuple[str, str]] = []
-    for ln in raw_lines:
-        if ":" in ln:
-            spk, txt = ln.split(":", 1)
-            parsed.append((spk.strip(), txt.strip()))
-
-    return parsed
+    return data
