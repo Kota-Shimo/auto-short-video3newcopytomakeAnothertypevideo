@@ -1,68 +1,131 @@
 # translate.py
-"""GPT-ベースの汎用翻訳ユーティリティ – 任意ターゲット言語対応
-   ◎ リトライ／改行除去／失敗プレースホルダ付き改良版
+"""GPT翻訳ユーティリティ
+- src_lang を明示できるようにして混在を防止
+- 言語ガードで "それ bagus." のような混在を自動リトライ
+- リトライ/バックオフ/整形を内蔵
 """
 from __future__ import annotations
 
 import re, time, random, logging
+from typing import Optional
 from openai import OpenAI
 from config import OPENAI_API_KEY
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ──────────────────────────────────────────────
-# 既に目的言語らしければスキップする簡易判定
-# （en / ja / ko のみ厳密、その他は常に翻訳）
-# ──────────────────────────────────────────────
+# ---- 言語名マップ（プロンプト用） ----
+LANG_NAME = {
+    "en": "English", "ja": "Japanese", "ko": "Korean",
+    "id": "Indonesian", "pt": "Portuguese", "es": "Spanish",
+    "fr": "French", "de": "German", "it": "Italian",
+    "zh": "Chinese", "ar": "Arabic",
+}
+
+# ---- 文字判定ヘルパ ----
+_RE_CJK   = re.compile(r"[\u3040-\u30ff\u4e00-\u9fff]")
+_RE_HANG  = re.compile(r"[\uAC00-\uD7AF]")
+_RE_LATIN = re.compile(r"[A-Za-z]")
+
 def _looks_like(text: str, lang: str) -> bool:
     if lang == "en":
-        return all(ord(c) < 128 for c in text)           # 完全 ASCII
+        # ほぼ ASCII（記号/数字/空白はOK）
+        letters = re.sub(r"[^A-Za-z]", "", text)
+        return len(letters) > 0 and len(letters) >= int(len(text) * 0.3)
     if lang == "ja":
-        return (bool(set(text) & {chr(i) for i in range(0x3040, 0x30FF)})  # ひらカナ
-                or bool(re.search(r"[\u4E00-\u9FFF]", text)))              # 漢字
+        return bool(_RE_CJK.search(text))
     if lang == "ko":
-        return bool(re.search(r"[\uAC00-\uD7AF]", text)) # ハングル
+        return bool(_RE_HANG.search(text))
+    # その他は判定困難 → 常に翻訳
     return False
-# ──────────────────────────────────────────────
 
+def _target_guard_ok(text: str, target: str) -> bool:
+    """出力がターゲット言語っぽいか簡易チェック"""
+    if target == "ja":
+        # 日本語は CJK を必ず含み、ラテン文字だらけでない
+        if not _RE_CJK.search(text):
+            return False
+        # ラテン文字比率が高すぎない（英単語混入対策）
+        latin = len(_RE_LATIN.findall(text))
+        return latin <= max(3, int(len(text) * 0.15))
+    if target == "ko":
+        return _RE_HANG.search(text) is not None
+    else:
+        # ラテン系（id/pt/es…）は CJK/Hangul が混ざってないことを確認
+        return not (_RE_CJK.search(text) or _RE_HANG.search(text))
 
-MAX_RETRY = 3      # ↩ API の一時失敗に備えて最大 3 回
-BACKOFF   = 1.5    # ↩ リトライ間隔（秒）
+def _clean_line(s: str) -> str:
+    s = s.replace("\n", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
-def translate(text: str, target: str) -> str:
+MAX_RETRY = 3
+BACKOFF   = 1.5
+
+def translate(text: str, target: str, src_lang: Optional[str] = None) -> str:
     """
-    text   : 原文
-    target : 'en', 'ja', 'ko', 'id', 'pt', … ISO-639-1
-    失敗時 : `[ID unavailable]` のような目印を返す
+    text      : 原文
+    target    : 'en','ja','ko','id','pt',... ISO-639-1
+    src_lang  : 可能なら明示（'ja','en' など）。未指定でも動作。
+    戻り値    : 訳文（失敗時は原文を返さず、[XX unavailable] を返す）
     """
-    if _looks_like(text, target):
-        return text
+    txt = text.strip()
+    if not txt:
+        return ""
 
-    system_prompt = (
-        "You are a professional translator. "
-        f"Translate the following text into {target.upper()} accurately. "
-        "Return the translation only."
+    # 既にターゲットっぽければ翻訳不要
+    if _looks_like(txt, target):
+        return _clean_line(txt)
+
+    tname = LANG_NAME.get(target, target)
+    sname = LANG_NAME.get(src_lang, "Auto") if src_lang else "Auto"
+
+    base_rules = (
+        "Translate completely into the target language. "
+        "Do not keep any source-language words unless they are proper nouns. "
+        "Keep tone natural and suitable for short subtitles. "
+        "Return ONLY the translation text."
     )
 
-    last_err: Exception | None = None
-    for attempt in range(1, MAX_RETRY + 1):
-        try:
-            rsp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": text},
-                ],
-                temperature=0.2,
+    def _prompt(strict: bool) -> list[dict]:
+        sys = (
+            f"You are a professional translator.\n"
+            f"Source language: {sname}\nTarget language: {tname}.\n"
+            + base_rules
+        )
+        if strict:
+            # 混在が出た時の強制モード
+            sys += (
+                " This is STRICT mode: output must be 100% in the target language, "
+                "no words from the source language."
             )
-            out = rsp.choices[0].message.content.strip().replace("\n", " ")
-            return out or text        # 応答空なら原文で代用
-        except Exception as e:
-            last_err = e
-            if attempt == MAX_RETRY:          # これが最後の試行
-                break
-            time.sleep(BACKOFF + random.random())  # 少しジッターを入れて待機
+        return [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": txt},
+        ]
 
-    # ---- ここに来たら全リトライ失敗 ----
-    logging.warning("Translate error (%s → %s): %s", text[:40], target, last_err)
+    last_err: Exception | None = None
+
+    # 通常 → ガード失敗時は STRICT で再試行
+    for strict in (False, True):
+        for attempt in range(1, MAX_RETRY + 1):
+            try:
+                rsp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=_prompt(strict),
+                    temperature=0.2,
+                )
+                out = _clean_line(rsp.choices[0].message.content)
+                if not out:
+                    raise RuntimeError("empty response")
+                if _target_guard_ok(out, target):
+                    return out
+                # ガードに失敗 → 次の試行へ
+                last_err = RuntimeError(f"language guard failed (-> {target}): {out[:40]}")
+            except Exception as e:
+                last_err = e
+            if attempt < MAX_RETRY:
+                time.sleep(BACKOFF + random.random())
+        # 通常モードがダメなら STRICT へ、STRICT でもダメなら終了
+
+    logging.warning("Translate error (%s → %s): %s", txt[:40], target, last_err)
     return f"[{target.upper()} unavailable]"
