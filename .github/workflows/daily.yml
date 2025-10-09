@@ -1,8 +1,8 @@
 #name: Auto-Podcast-Daily
 
-on:
+#on:
   # 実行時間: JST 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00
-  schedule:
+  #schedule:
     - cron: '0 15 * * *'   # UTC15:00 → JST00:00
     - cron: '0 18 * * *'   # UTC18:00 → JST03:00
     - cron: '0 21 * * *'   # UTC21:00 → JST06:00
