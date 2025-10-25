@@ -1,5 +1,8 @@
-"""Generate a two-person *discussion / roleplay* script via GPT-4o with strict monolingual output
-   and a light loop-back ending. Seed hook is supported.
+# dialogue.py
+"""Generate short scripts via GPT-4o.
+- Backward compatible: returns List[(speaker, text)] with 'Alice'/'Bob' alternating in dialogue modes.
+- Monologue-first in specific modes (wisdom, fact), using speaker 'N' (Narrator).
+- Growth structure: Hook → 3 beats → Closing. Short lines. Strictly monolingual & neutral (no language/country mentions).
 """
 
 from typing import List, Tuple
@@ -9,111 +12,233 @@ from config import OPENAI_API_KEY
 
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
+# ─────────────────────────────────────────
+# モード定義（中立的ガイド）※記号や英字ラベルの例示は避ける
+# ─────────────────────────────────────────
+MODE_GUIDE = {
+    "dialogue": "Real-life roleplay. Hook, then three short turns, then a concise closing. Keep universal.",
+    "howto":    "Actionable three-step guidance. Hook, then step one, step two, and a closing.",
+    "listicle": "Three concise points. Hook, point one, point two, point three, closing.",
+    "wisdom":   "Motivational. Hook, three short insights, closing.",
+    "fact":     "Micro-knowledge. Hook, three small facts/examples, closing.",
+    "qa":       "Three-step improvement: problem, better, best. Hook first, then closing.",
+}
 
-def _lang_rules(lang: str, topic_hint: str) -> str:
+# ナレーション中心にしたいモード
+MONOLOGUE_MODES = {"wisdom", "fact"}
+
+# ─────────────────────────────────────────
+# 言語・国名を出さない前提で、厳密モノリンガル化（ASCII記号の例示も出力禁止）
+# ─────────────────────────────────────────
+def _lang_rules(lang: str) -> str:
     """
-    Strong, language-specific constraints to prevent code-switching.
-    We keep them strict only where it commonly goes wrong (e.g., Japanese).
+    出力言語を厳密に単一化し、他言語/他文字体系や翻訳注釈を禁止。
+    出力内に言語名・国名・学習者呼称を出さない。
+    ASCII記号の使用も避ける（/, -, →, (), [], <>, | など）。
     """
     if lang == "ja":
-        # 日本語台本の英語混入・ローマ字混在を強く禁止
         return (
-            "This is a Japanese listening script. "
-            "Use pure Japanese only. "
-            "Do NOT include any English words, romaji (Latin letters), or code-switching. "
-            "Ignore any implication that English should appear even if the topic contains '英語'. "
-            "Natural Japanese only."
+            "Write entirely in Japanese. "
+            "Do not include Latin letters, non-Japanese words, or code-switching. "
+            "Avoid ASCII symbols such as '/', '-', '→', '()', '[]', '<>', and '|'. "
+            "No translation glosses or bracketed meanings. "
+            "Do not mention any language names, nationalities, or countries."
         )
-    # 他言語は基本ルールで十分（必要なら同様の強化を追加可能）
-    return f"Stay entirely in {lang}. Avoid mixing other languages."
+    return (
+        f"Write entirely in {lang}. "
+        "Do not code-switch or include other languages/writing systems. "
+        "Avoid ASCII symbols like '/', '-', '→', '()', '[]', '<>', and '|'. "
+        "No translation glosses or bracketed meanings. "
+        "Do not mention any language names, nationalities, or countries."
+    )
 
-
-def _sanitize_line(lang: str, text: str) -> str:
-    """
-    Post-processing to remove stray artifacts that make TTS stumble.
-    - ja: remove Latin letters, normalize ellipses, collapse spaces.
-    """
-    txt = text.strip()
-
+# 学習イントロを促すヒント（各言語で自然に）
+def _learning_intro_hint(lang: str) -> str:
     if lang == "ja":
-        # ローマ字・英単語を排除（数字は温存）
-        txt = re.sub(r"[A-Za-z]+", "", txt)
-        # 三点リーダや…/…を句点へ（TTS安定化）
-        txt = txt.replace("...", "。").replace("…", "。")
-        # 半角コロン前後の空白を整形
-        txt = re.sub(r"\s*:\s*", ": ", txt)
-        # 余分な空白を圧縮
-        txt = re.sub(r"\s+", " ", txt).strip()
-
+        return "Make the first line clearly say it's a learning intro, e.g.,『今日は〜を学ぼう』『今日の学び: 〜』. Keep it short and natural."
     else:
-        # 共通の軽い整形
-        txt = txt.replace("…", "...").strip()
+        return "Make the first line clearly invite learning, e.g., 'Let's learn … today.' or 'Today, we learn …'. Keep it short and natural."
 
+# ─────────────────────────────────────────
+# TTS 安定のための軽い整形（JAのみ特別処理）
+# ─────────────────────────────────────────
+def _sanitize_line(lang: str, text: str) -> str:
+    txt = text.strip()
+    if lang == "ja":
+        # ローマ字/英単語除去（数字は保持）
+        txt = re.sub(r"[A-Za-z]+", "", txt)
+        # 三点リーダなどを句点へ
+        txt = txt.replace("...", "。").replace("…", "。")
+        # ラベルのコロン周り整形
+        txt = re.sub(r"\s*:\s*", ": ", txt)
+        # 余分な空白圧縮
+        txt = re.sub(r"\s+", " ", txt).strip()
+        # 末尾が中途半端なら軽く締める
+        if txt and txt[-1] not in "。！？…!?":
+            txt += "。"
+    else:
+        txt = txt.replace("…", "...").strip()
     return txt
 
-
+# ─────────────────────────────────────────
+# 本体（不足分は埋めない／空行は捨てる）
+# ─────────────────────────────────────────
 def make_dialogue(
     topic: str,
     lang: str,
     turns: int = 8,
-    seed_phrase: str = ""
+    seed_phrase: str = "",
+    mode: str = "dialogue",
 ) -> List[Tuple[str, str]]:
     """
-    - Alice/Bob が交互に話す短い自然会話を生成（2*turns 行）
-    - seed_phrase をムード/スタイルのヒントに使う（逐語は避ける）
-    - 最終行は話題やフックを軽くリフレインしてループ感を演出
-    - 日本語の場合は英語・ローマ字混入を強く禁止 + 出力後にクレンジング
+    Returns: List[(speaker, text)]
+    - dialogue/howto/listicle/qa → Alice/Bob 交互の会話中心（最大 2*turns 行、空行は採用しない）
+    - wisdom/fact → N（Narrator）中心のモノローグ（最大 turns 行、空行は採用しない）
+    - Hook → 3ビート → Closing（ループ感）を推奨
+    - 出力は中立：特定の言語名・国名・学習者呼称を出さない
     """
-    # トピックのヒント（日本語のみ括弧表記）
+    is_monologue = mode in MONOLOGUE_MODES
+
     topic_hint = f"「{topic}」" if lang == "ja" else topic
+    lang_rules = _lang_rules(lang)
+    mode_guide = MODE_GUIDE.get(mode, MODE_GUIDE["dialogue"])
 
-    # 言語固有の厳格ルール
-    lang_rules = _lang_rules(lang, topic_hint)
-
-    # GPT へのプロンプト
-    prompt = (
-        f"You are a native-level {lang.upper()} dialogue writer.\n"
-        f"Write a short, natural conversation in {lang} between Alice and Bob.\n\n"
-        f"Scene topic: {topic_hint}\n"
-        f"Tone reference (seed phrase): \"{seed_phrase}\" (use only as mood/style hint; do not repeat it literally).\n\n"
-        "Rules:\n"
-        "1) Alternate strictly: Alice, Bob, Alice, Bob...\n"
-        f"2) Produce exactly {turns * 2} lines.\n"
-        "3) Each line begins with 'Alice:' or 'Bob:' and contains one short, natural sentence.\n"
-        f"4) {lang_rules}\n"
-        "5) No ellipses (...), no emojis, no bullet points, no stage directions.\n"
-        "6) Keep it friendly, realistic, and concise.\n"
-        "7) Make the final line subtly echo the main topic or hook to feel loopable.\n"
-        "8) Output ONLY the dialogue lines (no explanations).\n"
+    # 行長ヒント（文字体系ベース）
+    length_hint = (
+        "For alphabetic scripts: <= 12 words per line. "
+        "For CJK or similar: keep lines concise (~<=20 characters)."
     )
+
+    # モード別追加ルール＋学習イントロ要求（記号・英字ラベルを使わない）
+    intro_hint = _learning_intro_hint(lang)
+    if mode == "dialogue":
+        extra_rule = (
+            "Include exactly one short learning tip within the dialogue "
+            "as plain sentences (no labels). "
+            "Avoid slashes, arrows, or letter labels. "
+            + intro_hint
+        )
+    elif mode == "fact":
+        extra_rule = (
+            "Include one short, surprising point about communication or cultural nuance, "
+            "plus one concise example expression that fits the scene, as plain sentences. "
+            "Avoid slashes, arrows, or letter labels. "
+            + intro_hint
+        )
+    elif mode == "howto":
+        extra_rule = (
+            "Structure as a quick reason, then two short steps, then a simple nudge. "
+            "Express them as plain sentences; do not use numbered lists, slashes, or arrows. "
+            + intro_hint
+        )
+    elif mode == "listicle":
+        extra_rule = (
+            "Present three parallel points with a clear rhythm as plain sentences "
+            "(use natural connectors; avoid slashes and arrows). "
+            + intro_hint
+        )
+    elif mode == "wisdom":
+        extra_rule = (
+            "Keep it reflective and encouraging: one key idea, a tiny example, and a gentle takeaway. "
+            "Use plain sentences; no slashes or arrows. "
+            + intro_hint
+        )
+    elif mode == "qa":
+        extra_rule = (
+            "Show a three-step improvement pattern as plain sentences: problem, better, best. "
+            "Do not use arrows, slashes, or letter labels. "
+            + intro_hint
+        )
+    else:
+        extra_rule = intro_hint
+
+    if is_monologue:
+        # ── モノローグ（N のみ） ───────────────────────────────
+        user = f"""
+You are a native-level narration writer.
+
+Write a short, natural monologue in {lang} by a narrator 'N'.
+Topic: {topic_hint}
+Tone ref (seed): "{seed_phrase}" (style hint only; do not repeat literally)
+Mode: {mode} ({mode_guide})
+{extra_rule}
+
+STRUCTURE:
+- Line1 (Learning-intro Hook, 0–2s): clearly invite learning for today's topic
+- Lines2–4 (Beats 1–2): add pattern change (numbers, contrast, concrete example)
+- Lines5–6 (Beat 3): one visual tip/example
+- Final line (Closing, <=8s left): one clear action; subtly echo topic for loop feel
+
+Rules:
+1) Produce up to {turns} lines (all spoken by 'N'), concise one sentence each.
+2) Prefix each line with 'N:'.
+3) {lang_rules}
+4) {length_hint}
+5) Do not mention any language names, nationalities, or countries.
+6) Avoid lists, stage directions, emojis.
+7) Output ONLY the lines (no explanations).
+""".strip()
+    else:
+        # ── 会話（Alice/Bob 交互） ─────────────────────────────
+        user = f"""
+You are a native-level dialogue writer.
+
+Write a short, natural 2-person conversation in {lang} between Alice and Bob.
+Scene topic: {topic_hint}
+Tone ref (seed): "{seed_phrase}" (style hint only; do not repeat literally)
+Mode: {mode} ({mode_guide})
+{extra_rule}
+
+STRUCTURE (map to alternating lines):
+- Line1 (Learning-intro Hook, 0–2s): clearly invite learning for today's topic
+- Lines2–4 (Beats 1–2): pattern change (numbers, contrast, example)
+- Lines5–6 (Beat 3): one concrete, visual tip/example
+- Final line (Closing, <=8s left): one clear action; subtly echo topic for loop feel
+
+Rules:
+1) Alternate strictly: Alice:, Bob:, Alice:, Bob: ...
+2) Each line = one short sentence; no lists, no stage directions, no emojis.
+3) {lang_rules}
+4) {length_hint}
+5) Do not mention any language names, nationalities, or countries.
+6) Avoid repetitive endings; vary rhythm every ~8 seconds.
+7) Output ONLY the dialogue lines. No explanations.
+""".strip()
 
     rsp = openai.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.45,  # 安定寄り
+        messages=[{"role": "user", "content": user}],
+        temperature=0.6,
+        timeout=45,
     )
 
-    raw_lines = rsp.choices[0].message.content.strip().splitlines()
+    raw = rsp.choices[0].message.content or ""
+    raw_lines = raw.strip().splitlines()
+    result: List[Tuple[str, str]] = []
 
-    # "Alice:" or "Bob:" で始まる行のみを抽出
+    if is_monologue:
+        # "N:" 行のみを採用。空行は捨てる。パディングしない。
+        lines = [l.strip() for l in raw_lines if l.strip().startswith("N:")]
+        picked: List[Tuple[str, str]] = []
+        for ln in lines[:turns]:
+            spk, txt = ("N", ln.split(":", 1)[1].strip()) if ":" in ln else ("N", "")
+            txt = _sanitize_line(lang, txt)
+            if txt:
+                picked.append((spk, txt))
+        return picked
+
+    # 会話モード："Alice:" / "Bob:" のみ採用。空行は捨てる。パディングしない。
     lines = [l.strip() for l in raw_lines if l.strip().startswith(("Alice:", "Bob:"))]
-
-    # 過剰行はカット・不足は交互に追加
-    lines = lines[: turns * 2]
-    while len(lines) < turns * 2:
-        lines.append("Alice:" if len(lines) % 2 == 0 else "Bob:")
-
-    # "Alice: こんにちは" → ("Alice", "こんにちは")
-    parsed: List[Tuple[str, str]] = []
-    for ln in lines:
+    picked: List[Tuple[str, str]] = []
+    for ln in lines[: turns * 2]:
         if ":" in ln:
             spk, txt = ln.split(":", 1)
-            txt = _sanitize_line(lang, txt)
-            parsed.append((spk.strip(), txt.strip()))
-        else:
-            # 念のためのフォールバック（ラベルが欠けていた場合）
-            spk = "Alice" if len(parsed) % 2 == 0 else "Bob"
-            txt = _sanitize_line(lang, ln)
-            parsed.append((spk, txt))
+            txt = _sanitize_line(lang, txt.strip())
+            if txt:
+                picked.append((spk.strip(), txt))
 
-    return parsed
+    # 片側だけ残らないよう偶数本に揃える
+    if len(picked) % 2 == 1:
+        picked = picked[:-1]
+
+    return picked
