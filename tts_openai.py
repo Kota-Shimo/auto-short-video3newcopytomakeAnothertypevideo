@@ -1,4 +1,4 @@
-"""OpenAI TTS wrapper – language-aware & two-speaker support."""
+"""OpenAI TTS wrapper – language-aware & two-speaker support with simple style control."""
 
 import re
 from pathlib import Path
@@ -7,48 +7,90 @@ from config import OPENAI_API_KEY, VOICE_MAP
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# フォールバック用（言語が VOICE_MAP に無い場合）
-FALLBACK_VOICES = ("alloy", "echo")  # (Alice, Bob)
+# VOICE_MAP に無い言語のフォールバック（Alice, Bob）
+FALLBACK_VOICES = ("alloy", "echo")
 
 
 def _clean_for_tts(text: str, lang: str) -> str:
     """
-    音声合成前にテキストを整形：
-    - 話者名「Alice:」「Bob:」などを削除
-    - 不要な英語記号や半端な句読点を除去
-    - 空白や改行を整理
-    - 日本語TTSの誤読を防ぐため、英単語を一部カタカナっぽく分離
+    音声合成前の整形：
+    - 冒頭の話者ラベル（Alice:/Bob:/N:）を除去
+    - 余分な空白・改行を整理
+    - 日本語はローマ字/英単語・一部記号を除去して誤読を抑制
     """
-    t = re.sub(r"^[A-Za-z]+:\s*", "", text)  # Alice: など削除
-    t = re.sub(r"\s+", " ", t).strip()        # 改行・余白整理
+    t = re.sub(r"^[A-Za-z]+:\s*", "", text)  # Alice:/Bob:/N: を削除
+    t = re.sub(r"\s+", " ", t).strip()
 
-    # 言語別クリーンアップ（日本語用に特別処理）
     if lang == "ja":
-        # 英単語を無理に読ませないように除去またはスペース化
-        t = re.sub(r"[A-Za-z]+", "", t)
-        # 記号や不要な文字を除去
-        t = re.sub(r"[#\"'※＊*~`]", "", t)
+        t = re.sub(r"[A-Za-z]+", "", t)      # ローマ字/英単語の排除（数字は残す）
+        t = re.sub(r"[#\"'※＊*~`]", "", t)   # 記号の整理
         t = re.sub(r"\s+", " ", t).strip()
 
-    return t or "。"
+    return t or ("。" if lang == "ja" else ".")
 
 
-def speak(lang: str, speaker: str, text: str, out_path: Path):
+def _apply_style(text: str, lang: str, style: str) -> str:
+    """
+    句読点で“抑揚”を軽く誘導する簡易スタイル。
+    - energetic: 感嘆系で勢いをつける
+    - calm     : 句点で落ち着かせる
+    - serious  : 断定調（末尾を句点で締める）
+    - neutral  : 変更なし
+    ※ モデルのプロソディを直接制御しないため下位互換で安全。
+    """
+    s = text.strip()
+    st = (style or "neutral").lower()
+
+    if st == "energetic":
+        if lang == "ja":
+            s = s.rstrip("。!！？」").rstrip()
+            s = s + "！"
+        else:
+            s = s.rstrip(".!? ").rstrip()
+            s = s + "!"
+    elif st == "calm":
+        if lang == "ja":
+            s = s.rstrip("。!！？」").rstrip()
+            s = s + "。"
+        else:
+            s = s.rstrip(".!? ").rstrip()
+            s = s + "."
+    elif st == "serious":
+        if lang == "ja":
+            s = re.sub(r"[！!？?]+$", "", s).rstrip()
+            if not s.endswith("。"):
+                s += "。"
+        else:
+            s = re.sub(r"[!?\s]+$", "", s).rstrip()
+            if not s.endswith("."):
+                s += "."
+    # neutral は変更なし
+    return s
+
+
+def speak(lang: str, speaker: str, text: str, out_path: Path, style: str = "neutral"):
     """
     lang     : 'en', 'ja', 'pt', 'id' など
-    speaker  : 'Alice' / 'Bob' で声を切替
-    text     : セリフ
-    out_path : 書き出し先 .mp3
+    speaker  : 'Alice' / 'Bob' / 'N'（N=ナレーションは Alice 側の声を使用）
+    text     : セリフ本文
+    out_path : 出力先 .mp3 パス
+    style    : 'neutral' | 'energetic' | 'calm' | 'serious'
     """
-    # ✅ 音声化前にクリーンアップ
-    clean_text = _clean_for_tts(text, lang)
+    # 1) テキスト整形 → スタイル適用
+    clean_text  = _clean_for_tts(text, lang)
+    styled_text = _apply_style(clean_text, lang, style)
 
+    # 2) ボイス選択（N は Alice 側に割当）
     v_a, v_b = VOICE_MAP.get(lang, FALLBACK_VOICES)
-    voice_id = v_a if speaker.lower() == "alice" else v_b
+    spk = (speaker or "").lower()
+    voice_id = v_a if spk in ("alice", "n") else v_b
+    # ※ Bob 側に N を合わせたい場合は下のように切替
+    # voice_id = v_b if spk in ("bob", "n") else v_a
 
+    # 3) 音声合成
     resp = client.audio.speech.create(
-        model="tts-1",          # 高音質は "tts-1-hd"
+        model="tts-1",      # より高音質は "tts-1-hd"（コスト↑）
         voice=voice_id,
-        input=clean_text
+        input=styled_text,
     )
     out_path.write_bytes(resp.content)
