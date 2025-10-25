@@ -1,17 +1,16 @@
-#name: Auto-Podcast-Daily
+name: Auto-Podcast-Daily
 
-#on:
-  # 実行時間: JST 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00
-  #schedule:
-    - cron: '0 15 * * *'   # UTC15:00 → JST00:00
-    - cron: '0 18 * * *'   # UTC18:00 → JST03:00
-    - cron: '0 21 * * *'   # UTC21:00 → JST06:00
-    - cron: '0 0  * * *'   # UTC00:00 → JST09:00
-    - cron: '0 3  * * *'   # UTC03:00 → JST12:00
-    - cron: '0 6  * * *'   # UTC06:00 → JST15:00
-    - cron: '0 9  * * *'   # UTC09:00 → JST18:00
-    - cron: '0 12 * * *'   # UTC12:00 → JST21:00
-  workflow_dispatch:        # 手動トリガー
+on:
+  schedule:
+    - cron: '0 15 * * *'   # JST00:00
+    #- cron: '0 18 * * *'   # JST03:00
+    #- cron: '0 21 * * *'   # JST06:00
+    #- cron: '0 0  * * *'   # JST09:00
+    #- cron: '0 3  * * *'   # JST12:00
+   # - cron: '0 6  * * *'   # JST15:00
+    #- cron: '0 9  * * *'   # JST18:00
+    #- cron: '0 12 * * *'   # JST21:00
+  workflow_dispatch:
 
 concurrency:
   group: auto-podcast-${{ github.ref }}
@@ -23,17 +22,14 @@ jobs:
     timeout-minutes: 540
 
     steps:
-      # ① リポジトリ取得
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v4
 
-      # ② Python
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # ③ 依存ライブラリ
       - name: 📦 Install requirements
         run: |
           sudo apt-get update -y
@@ -44,33 +40,50 @@ jobs:
       - name: 🔑 Restore YouTube tokens
         env:
           YT_ACC1: ${{ secrets.YT_TOKEN_ACC1 }}
-          YT_ACC2: ${{ secrets.YT_TOKEN_ACC2 }}   # ← 新しく追加
-          YT_ACC3: ${{ secrets.YT_TOKEN_ACC3 }}   # ← 新しく追加
-          YT_ACC4: ${{ secrets.YT_TOKEN_ACC4 }}   # ← 新しく追加
+          YT_ACC2: ${{ secrets.YT_TOKEN_ACC2 }}
+          YT_ACC3: ${{ secrets.YT_TOKEN_ACC3 }}
+          YT_ACC4: ${{ secrets.YT_TOKEN_ACC4 }}
           YT_ACC5: ${{ secrets.YT_TOKEN_ACC5 }}
           YT_ACC6: ${{ secrets.YT_TOKEN_ACC6 }}
         run: |
           mkdir -p tokens
           echo "$YT_ACC1" | base64 -d > tokens/token_acc1.pkl
-          echo "$YT_ACC2" | base64 -d > tokens/token_acc2.pkl  # ← こちらも追加
-          echo "$YT_ACC3" | base64 -d > tokens/token_acc3.pkl  # ← こちらも追加
-          echo "$YT_ACC4" | base64 -d > tokens/token_acc4.pkl  # ← こちらも追加
+          echo "$YT_ACC2" | base64 -d > tokens/token_acc2.pkl
+          echo "$YT_ACC3" | base64 -d > tokens/token_acc3.pkl
+          echo "$YT_ACC4" | base64 -d > tokens/token_acc4.pkl
           echo "$YT_ACC5" | base64 -d > tokens/token_acc5.pkl
           echo "$YT_ACC6" | base64 -d > tokens/token_acc6.pkl
 
-      # ⑤ トピック決定
+      - name: 🎲 Pick content mode (random)
+        id: mode
+        shell: bash
+        run: |
+          MODES=(dialogue)
+          MODE=${MODES[$RANDOM % ${#MODES[@]}]}
+          echo "mode=$MODE" | tee -a "$GITHUB_OUTPUT"
+
       - name: 📝 Pick today’s topic
         id: topic
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        shell: bash
         run: |
-          echo "topic=$(python topic_picker.py)" >> "$GITHUB_OUTPUT"
+          topic=$(python - <<'PY'
+          from topic_picker import pick_by_content_type
+          import os
+          print(pick_by_content_type(os.environ.get("MODE","wisdom"), "ja"))
+          PY
+          )
+          echo "topic=$topic" | tee -a "$GITHUB_OUTPUT"
 
-      # ⑥ (最終) main.py を一発実行し、コンボごとに動画生成＆アップロード
       - name: 🎬 Build & Upload All Combos
         env:
           OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+          CONTENT_MODE:        ${{ steps.mode.outputs.mode }}
         run: |
-          python main.py "${{ steps.topic.outputs.topic }}" \
-            --turns 6 \
+          python main.py "AUTO" \
+            --turns 8 \
             --privacy public \
             --chunk 40
