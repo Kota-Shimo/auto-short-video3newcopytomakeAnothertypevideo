@@ -21,21 +21,72 @@ FILTER = (
 )
 # -----------------------------------------------------------
 
+
+def _require_bin(name: str):
+    if not shutil.which(name):
+        raise RuntimeError(f"{name} が見つかりません。PATH を確認してください。")
+
+
+def _ffprobe_duration_and_format(in_file: Path) -> tuple[float, str]:
+    """
+    ffprobe でフォーマット名と持続時間(秒)を取得する。
+    失敗したら例外ではなく ( -1.0, "" ) を返す（原因を上流に示すため）。
+    """
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration,format_name",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(in_file)
+        ]
+        # 出力は 1行目: format_name（例: mp3）, 2行目: duration（例: 12.345678）
+        res = subprocess.run(cmd, text=True, capture_output=True)
+        if res.returncode != 0:
+            return -1.0, ""
+        lines = [x.strip() for x in res.stdout.splitlines() if x.strip()]
+        if len(lines) < 2:
+            return -1.0, ""
+        fmt = lines[0]
+        try:
+            dur = float(lines[1])
+        except ValueError:
+            dur = -1.0
+        return dur, fmt
+    except Exception:
+        return -1.0, ""
+
+
 def enhance(in_mp3: Path, out_mp3: Path):
     """
     in_mp3  : 入力 mp3
     out_mp3 : 整音後 mp3
     """
-    # ffmpeg バイナリ確認
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg が見つかりません。PATH を確認してください。")
+    _require_bin("ffmpeg")
+    _require_bin("ffprobe")
 
-    # 入力存在チェック（早期に原因を出す）
     in_mp3 = Path(in_mp3)
     out_mp3 = Path(out_mp3)
 
+    # 入力ファイルの存在とサイズを早期チェック
     if not in_mp3.exists():
         raise FileNotFoundError(f"入力ファイルが見つかりません: {in_mp3}")
+    size = in_mp3.stat().st_size
+    if size < 2048:
+        raise RuntimeError(
+            f"入力MP3のサイズが小さすぎます（{size} bytes）。"
+            " TTS 生成が未完了/失敗の可能性。上流の生成処理を確認してください。"
+        )
+
+    # ffprobe で形式と長さを確認（ここで多くの壊れ方を検出可能）
+    dur, fmt = _ffprobe_duration_and_format(in_mp3)
+    if dur < 0 or dur < 0.2:
+        raise RuntimeError(
+            "入力MP3が壊れている/極端に短い可能性があります。\n"
+            f"- ffprobe format: {fmt or '未知'}\n"
+            f"- ffprobe duration: {dur:.3f} sec\n"
+            "※ 典型例: ID3タグのみで音声フレームが無い、TTS失敗で空ファイル、保存前に読み出し等。\n"
+            "上流（TTS→書き込み）の処理が正常終了しているか、ファイルを閉じてから参照しているかを確認してください。"
+        )
 
     # 出力フォルダを安全に作成
     out_mp3.parent.mkdir(parents=True, exist_ok=True)
@@ -50,10 +101,9 @@ def enhance(in_mp3: Path, out_mp3: Path):
         str(out_mp3)
     ]
 
-    # 実行コマンドを出力（後で再現しやすい）
+    # 実行コマンドを出力（再現性のため）
     print("▶ FFmpeg cmd:", " ".join(cmd))
 
-    # 標準出力・エラーをキャプチャして、失敗時に丸ごと表示
     proc = subprocess.run(cmd, text=True, capture_output=True)
 
     if proc.returncode != 0:
@@ -64,5 +114,9 @@ def enhance(in_mp3: Path, out_mp3: Path):
             f"---- STDERR ----\n{err}\n"
             f"---- STDOUT ----\n{out}\n"
             "----------------\n"
-            "※ 上のエラー出力を貼ってくれれば、原因を特定して修正案を出します。"
+            "よくある原因:\n"
+            " 1) 入力MP3が未完/破損（ID3のみ等）\n"
+            " 2) 実体がMP3でない（拡張子だけmp3）\n"
+            " 3) 出力先パスの権限/存在\n"
+            "→ まず上の ffprobe 情報と STDERR をチェックしてください。"
         )
