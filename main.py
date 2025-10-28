@@ -12,9 +12,14 @@ main.py – GPTで台本（伸びる構成）→ OpenAI TTS → 「lines.json & 
 - 行間に短い無音ギャップ（聴感テンポ改善）
 - タイトル/タグを中立化＋学習語に寄せてスコアリング
 - 🔤（追加）日本語タイトル時は音声言語に応じて「◯◯語会話」を自然に付与
+
+堅牢化（今回追加）
+- speak() の直後に各行 mp3 を検査（サイズ>=2KB & duration>=0.2s）。ダメならリトライ。
+- full_raw.mp3 も検査。ダメならコンボをスキップして後続へ継続。
+- enhance() での SmallAudioError/RuntimeError を捕捉してスキップ（全体継続）。
 """
 
-import argparse, logging, re, json, subprocess, os
+import argparse, logging, re, json, subprocess, os, time
 from datetime import datetime
 from pathlib import Path
 from shutil import rmtree
@@ -27,7 +32,7 @@ from config         import BASE, OUTPUT, TEMP
 from dialogue       import make_dialogue
 from translate      import translate
 from tts_openai     import speak
-from audio_fx       import enhance
+from audio_fx       import enhance, SmallAudioError
 from bg_image       import fetch as fetch_bg
 from thumbnail      import make_thumbnail
 from upload_youtube import upload
@@ -94,6 +99,37 @@ JP_CONV_LABEL = {
     "ko": "韓国語会話",
     "id": "インドネシア語会話",
 }
+
+# ───────────────────────────────────────────────
+# ユーティリティ: ffprobe で duration を取る
+# ───────────────────────────────────────────────
+def _ffprobe_duration(path: Path) -> float:
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path)
+        ]
+        res = subprocess.run(cmd, text=True, capture_output=True)
+        if res.returncode != 0:
+            return -1.0
+        return float(res.stdout.strip())
+    except Exception:
+        return -1.0
+
+def _is_valid_mp3(path: Path, min_bytes=2048, min_dur=0.2) -> bool:
+    try:
+        if not path.exists():
+            return False
+        if path.stat().st_size < min_bytes:
+            return False
+        dur = _ffprobe_duration(path)
+        if dur < min_dur:
+            return False
+        return True
+    except Exception:
+        return False
 
 # ───────────────────────────────────────────────
 # トピック取得: "AUTO"なら自動ピック、文字列ならそのまま
@@ -260,6 +296,19 @@ def _concat_trim_to(mp_paths, max_sec, gap_ms=120):
     return new_durs
 
 # ───────────────────────────────────────────────
+# 行ごとの音声ファイルを堅牢に作る（リトライ付き）
+# ───────────────────────────────────────────────
+def _speak_with_retry(audio_lang: str, spk: str, line: str, out_mp3: Path, style: str,
+                      max_retry: int = 3, backoff_base: float = 1.5) -> bool:
+    for attempt in range(1, max_retry + 1):
+        speak(audio_lang, spk, line, out_mp3, style=style)  # あなたの既存実装
+        if _is_valid_mp3(out_mp3):
+            return True
+        logging.warning(f"[TTS] small/broken mp3 (attempt {attempt}/{max_retry}) -> {out_mp3}")
+        time.sleep(backoff_base * attempt)  # 軽いバックオフ
+    return False
+
+# ───────────────────────────────────────────────
 # 1コンボ処理
 # ───────────────────────────────────────────────
 def run_one(topic, turns, audio_lang, subs, title_lang, yt_privacy, account, do_upload, chunk_size):
@@ -283,14 +332,34 @@ def run_one(topic, turns, audio_lang, subs, title_lang, yt_privacy, account, do_
     for i, (spk, line) in enumerate(valid_dialogue, 1):
         mp = TEMP / f"{i:02d}.mp3"
         style = _style_for_line(i-1, len(valid_dialogue), CONTENT_MODE)
-        speak(audio_lang, spk, line, mp, style=style)
+
+        # 🔒 TTS 出力を検査し、壊れていたら自動リトライ
+        ok = _speak_with_retry(audio_lang, spk, line, mp, style=style)
+        if not ok:
+            logging.error(f"[TTS] failed to get valid mp3 for line {i}: '{line[:40]}' ... -> SKIP this combo")
+            return  # このコンボは諦め、次のコンボへ（全体継続）
+
         mp_parts.append(mp)
         for r, lang in enumerate(subs):
             sub_rows[r].append(line if lang == audio_lang else translate(line, lang))
 
-    # 結合・整音
+    # 結合・整音前チェック
     new_durs = _concat_trim_to(mp_parts, MAX_SHORTS_SEC, gap_ms=120)
-    enhance(TEMP/"full_raw.mp3", TEMP/"full.mp3")
+
+    # 連結結果の健全性チェック（ここで落ちるケースが今回の症状）
+    if not _is_valid_mp3(TEMP / "full_raw.mp3"):
+        logging.error("[AUDIO] full_raw.mp3 is invalid (too small or too short). SKIP this combo")
+        return
+
+    # 整音（失敗したらこのコンボだけスキップ）
+    try:
+        enhance(TEMP/"full_raw.mp3", TEMP/"full.mp3")
+    except SmallAudioError as e:
+        logging.error(f"[AUDIO] enhance SmallAudioError: {e} -> SKIP this combo")
+        return
+    except RuntimeError as e:
+        logging.error(f"[AUDIO] enhance failed: {e} -> SKIP this combo")
+        return
 
     # 背景
     bg_png = TEMP / "bg.png"
@@ -351,7 +420,11 @@ def run_all(topic, turns, privacy, do_upload, chunk_size):
         account     = combo.get("account","default")
         title_lang  = combo.get("title_lang", subs[1] if len(subs)>1 else audio_lang)
         logging.info(f"=== Combo: {audio_lang}, subs={subs}, account={account}, title_lang={title_lang}, mode={CONTENT_MODE} ===")
-        run_one(topic, turns, audio_lang, subs, title_lang, privacy, account, do_upload, chunk_size)
+        try:
+            run_one(topic, turns, audio_lang, subs, title_lang, privacy, account, do_upload, chunk_size)
+        except Exception as e:
+            # 予期せぬ例外でも全体を止めず、次のコンボへ
+            logging.exception(f"[FALLBACK] combo crashed: {e} -> continue")
 
 # ───────────────────────────────────────────────
 if __name__ == "__main__":
