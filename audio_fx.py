@@ -3,6 +3,11 @@ import subprocess
 import shutil
 from pathlib import Path
 
+# ==== 例外クラス（main.py から import される）====
+class SmallAudioError(RuntimeError):
+    """入力音源が小さすぎる/壊れている場合に投げる例外。"""
+    pass
+
 # -----------------------------------------------------------
 # FILTER chain
 #   1) highpass 60 Hz         : 空調/机振動カット
@@ -21,16 +26,14 @@ FILTER = (
 )
 # -----------------------------------------------------------
 
-
 def _require_bin(name: str):
     if not shutil.which(name):
         raise RuntimeError(f"{name} が見つかりません。PATH を確認してください。")
 
-
 def _ffprobe_duration_and_format(in_file: Path) -> tuple[float, str]:
     """
-    ffprobe でフォーマット名と持続時間(秒)を取得する。
-    失敗したら例外ではなく ( -1.0, "" ) を返す（原因を上流に示すため）。
+    ffprobe でフォーマット名と持続時間(秒)を取得。
+    失敗時は (-1.0, "") を返す。
     """
     try:
         cmd = [
@@ -39,7 +42,7 @@ def _ffprobe_duration_and_format(in_file: Path) -> tuple[float, str]:
             "-of", "default=noprint_wrappers=1:nokey=1",
             str(in_file)
         ]
-        # 出力は 1行目: format_name（例: mp3）, 2行目: duration（例: 12.345678）
+        # 出力: 1行目=format_name, 2行目=duration
         res = subprocess.run(cmd, text=True, capture_output=True)
         if res.returncode != 0:
             return -1.0, ""
@@ -54,7 +57,6 @@ def _ffprobe_duration_and_format(in_file: Path) -> tuple[float, str]:
         return dur, fmt
     except Exception:
         return -1.0, ""
-
 
 def enhance(in_mp3: Path, out_mp3: Path):
     """
@@ -72,20 +74,20 @@ def enhance(in_mp3: Path, out_mp3: Path):
         raise FileNotFoundError(f"入力ファイルが見つかりません: {in_mp3}")
     size = in_mp3.stat().st_size
     if size < 2048:
-        raise RuntimeError(
+        # ← 小さすぎ/未完ファイルは SmallAudioError に分類
+        raise SmallAudioError(
             f"入力MP3のサイズが小さすぎます（{size} bytes）。"
             " TTS 生成が未完了/失敗の可能性。上流の生成処理を確認してください。"
         )
 
-    # ffprobe で形式と長さを確認（ここで多くの壊れ方を検出可能）
+    # ffprobe で形式と長さを確認
     dur, fmt = _ffprobe_duration_and_format(in_mp3)
     if dur < 0 or dur < 0.2:
-        raise RuntimeError(
+        raise SmallAudioError(
             "入力MP3が壊れている/極端に短い可能性があります。\n"
             f"- ffprobe format: {fmt or '未知'}\n"
             f"- ffprobe duration: {dur:.3f} sec\n"
-            "※ 典型例: ID3タグのみで音声フレームが無い、TTS失敗で空ファイル、保存前に読み出し等。\n"
-            "上流（TTS→書き込み）の処理が正常終了しているか、ファイルを閉じてから参照しているかを確認してください。"
+            "※ 典型例: ID3タグのみで音声フレームが無い、TTS失敗で空ファイル、保存前に読み出し等。"
         )
 
     # 出力フォルダを安全に作成
@@ -94,16 +96,14 @@ def enhance(in_mp3: Path, out_mp3: Path):
     cmd = [
         "ffmpeg",
         "-y",
-        "-hide_banner", "-nostdin", "-loglevel", "error",  # エラーメッセージのみ簡潔に
+        "-hide_banner", "-nostdin", "-loglevel", "error",
         "-i", str(in_mp3),
         "-af", FILTER,
-        "-ar", "48000",  # 48 kHz に統一（必要に応じて 44100）
+        "-ar", "48000",
         str(out_mp3)
     ]
 
-    # 実行コマンドを出力（再現性のため）
     print("▶ FFmpeg cmd:", " ".join(cmd))
-
     proc = subprocess.run(cmd, text=True, capture_output=True)
 
     if proc.returncode != 0:
